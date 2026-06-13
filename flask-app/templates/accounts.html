@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Email Accounts — OutreachCommand{% endblock %}
+{% block content %}
+<h1>Email Accounts</h1>
+
+<div class="card">
+  <h2>Add / Update Account</h2>
+  <form method="post">
+    <div class="form-row">
+      <div class="form-group">
+        <label>Email Address</label>
+        <input type="email" name="email_address" required>
+      </div>
+      <div class="form-group">
+        <label>App Password (Gmail 16-digit)</label>
+        <input type="password" name="app_password" required>
+      </div>
+      <div class="form-group">
+        <label>SMTP Host</label>
+        <input type="text" name="smtp_host" value="smtp.gmail.com">
+      </div>
+      <div class="form-group">
+        <label>SMTP Port</label>
+        <input type="number" name="smtp_port" value="587">
+      </div>
+    </div>
+    <button type="submit" class="btn btn-primary">Save Account</button>
+  </form>
+</div>
+
+<table class="data-table">
+  <thead>
+    <tr>
+      <th>Email</th>
+      <th>SMTP</th>
+      <th>Daily Sent / Limit</th>
+      <th>Warmup</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for acc in accounts %}
+    <tr>
+      <td>{{ acc.email_address }}</td>
+      <td>{{ acc.smtp_host }}:{{ acc.smtp_port }}</td>
+      <td>{{ acc.daily_sent_count }} / {{ settings.daily_limit_per_account }}</td>
+      <td>
+        <form method="post" action="{{ url_for('account_warmup', account_id=acc.id) }}">
+          <label style="font-weight:normal;">
+            <input type="checkbox" name="warmup_enabled" value="on" onchange="this.form.submit()" {% if acc.warmup_enabled %}checked{% endif %}>
+            On (day {{ acc.warmup_day }})
+          </label>
+        </form>
+      </td>
+      <td class="actions">
+        <button type="button" class="btn btn-sm btn-secondary test-btn" data-id="{{ acc.id }}">Test SMTP</button>
+        <span class="test-result" id="test-{{ acc.id }}"></span>
+        <form method="post" action="{{ url_for('account_delete', account_id=acc.id) }}" style="display:inline;" onsubmit="return confirm('Delete account?');">
+          <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="empty">No accounts yet. Add one above.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.querySelectorAll('.test-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const id = btn.dataset.id;
+    const el = document.getElementById('test-' + id);
+    btn.disabled = true;
+    el.textContent = 'Testing...';
+    el.className = 'test-result';
+    try {
+      const res = await fetch('/accounts/' + id + '/test', { method: 'POST' });
+      const data = await res.json();
+      el.textContent = data.message;
+      el.className = 'test-result ' + (data.ok ? 'success' : 'error');
+    } catch (e) {
+      el.textContent = 'Error: ' + e.message;
+      el.className = 'test-result error';
+    } finally {
+      btn.disabled = false;
+    }
+  });
+});
+</script>
+{% endblock %}

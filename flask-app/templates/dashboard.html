@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — OutreachCommand{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+
+<div class="stats-grid">
+  <div class="stat-card"><span class="stat-label">Total Leads</span><span class="stat-value">{{ stats.total }}</span></div>
+  <div class="stat-card"><span class="stat-label">Active</span><span class="stat-value">{{ stats.active }}</span></div>
+  <div class="stat-card"><span class="stat-label">Sent</span><span class="stat-value">{{ stats.sent }}</span></div>
+  <div class="stat-card"><span class="stat-label">Opened</span><span class="stat-value">{{ stats.opened }}</span></div>
+  <div class="stat-card"><span class="stat-label">Open Rate</span><span class="stat-value">{{ stats.open_rate }}%</span></div>
+  <div class="stat-card"><span class="stat-label">Clicked</span><span class="stat-value">{{ stats.clicked }}</span></div>
+  <div class="stat-card"><span class="stat-label">Click Rate</span><span class="stat-value">{{ stats.click_rate }}%</span></div>
+  <div class="stat-card"><span class="stat-label">Replies</span><span class="stat-value">{{ stats.replies }}</span></div>
+  <div class="stat-card"><span class="stat-label">Unsubscribed</span><span class="stat-value">{{ stats.unsubbed }}</span></div>
+</div>
+
+<div class="status-bar">
+  {% if stats.schedule_status == 'outside_window' %}
+    <span class="badge badge-warn">Sending paused — outside schedule</span>
+  {% elif stats.schedule_status == 'rate_limit' and stats.next_send_mins is not none %}
+    <span class="badge badge-info">Next send in {{ stats.next_send_mins }} minute(s)</span>
+  {% else %}
+    <span class="badge badge-ok">Scheduler active</span>
+  {% endif %}
+  {% if stats.last_sent_mins is not none %}
+    <span class="muted">Last email sent: {{ stats.last_sent_mins }} minute(s) ago</span>
+  {% else %}
+    <span class="muted">No emails sent yet</span>
+  {% endif %}
+</div>
+
+<div class="actions-row">
+  <button type="button" id="trigger-btn" class="btn btn-primary">Trigger Sequence Now</button>
+  <form method="post" action="{{ url_for('check_replies_route') }}" style="display:inline;">
+    <button type="submit" class="btn btn-secondary">Check Replies Now</button>
+  </form>
+</div>
+<div id="trigger-result" class="trigger-result hidden"></div>
+
+<h2>Recent Leads Pipeline</h2>
+<table class="data-table">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Email</th>
+      <th>Company</th>
+      <th>Step</th>
+      <th>Status</th>
+      <th>Account</th>
+      <th>Opened</th>
+      <th>Replied</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for lead in leads %}
+    <tr>
+      <td>{{ lead.full_name }}</td>
+      <td>{{ lead.email }}</td>
+      <td>{{ lead.company or '—' }}</td>
+      <td>{{ lead.sequence_step }}/3</td>
+      <td><span class="badge badge-{{ lead.status_label().lower() }}">{{ lead.status_label() }}</span></td>
+      <td>{{ lead.assigned_account or '—' }}</td>
+      <td>{{ 'Yes' if lead.opened else 'No' }}</td>
+      <td>{{ 'Yes' if lead.replied else 'No' }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="8" class="empty">No leads yet. <a href="{{ url_for('upload') }}">Upload CSV</a></td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('trigger-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('trigger-btn');
+  const box = document.getElementById('trigger-result');
+  btn.disabled = true;
+  box.classList.remove('hidden');
+  box.textContent = 'Sending...';
+  box.className = 'trigger-result';
+  try {
+    const res = await fetch('{{ url_for("trigger_sequence") }}', { method: 'POST' });
+    const data = await res.json();
+    const ok = data.sent > 0;
+    box.className = 'trigger-result ' + (ok ? 'success' : 'warn');
+    box.textContent = JSON.stringify(data, null, 2);
+  } catch (e) {
+    box.className = 'trigger-result error';
+    box.textContent = 'Error: ' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Email Logs — OutreachCommand{% endblock %}
+{% block content %}
+<h1>Email Logs</h1>
+
+<form method="get" class="filter-bar">
+  <select name="account">
+    <option value="">All accounts</option>
+    {% for acc in accounts %}
+    <option value="{{ acc.email_address }}" {% if filters.account == acc.email_address %}selected{% endif %}>{{ acc.email_address }}</option>
+    {% endfor %}
+  </select>
+  <select name="step">
+    <option value="">All steps</option>
+    <option value="1" {% if filters.step == '1' %}selected{% endif %}>Step 1</option>
+    <option value="2" {% if filters.step == '2' %}selected{% endif %}>Step 2</option>
+    <option value="3" {% if filters.step == '3' %}selected{% endif %}>Step 3</option>
+  </select>
+  <input type="date" name="date_from" value="{{ filters.date_from }}">
+  <input type="date" name="date_to" value="{{ filters.date_to }}">
+  <button type="submit" class="btn btn-secondary">Filter</button>
+  <a href="{{ url_for('logs_export', **filters) }}" class="btn btn-primary">Export CSV</a>
+</form>
+
+<p class="muted">Showing up to 500 most recent campaign logs.</p>
+
+<table class="data-table">
+  <thead>
+    <tr>
+      <th>Lead</th>
+      <th>Email</th>
+      <th>Subject</th>
+      <th>Step</th>
+      <th>Sent At</th>
+      <th>Opened</th>
+      <th>Clicked</th>
+      <th>Account</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for log in logs %}
+    <tr>
+      <td>{{ log.lead_name or '—' }}</td>
+      <td>{{ log.lead_email or '—' }}</td>
+      <td title="{{ log.subject or '' }}">{{ (log.subject or '—')[:40] }}{% if log.subject and log.subject|length > 40 %}...{% endif %}</td>
+      <td>{{ log.step }}</td>
+      <td>{{ log.sent_at.strftime('%Y-%m-%d %H:%M') if log.sent_at else '—' }}</td>
+      <td>
+        {% if log.opened_at %}
+          <span class="badge badge-ok">Yes</span>
+          <span class="muted" style="font-size:0.75rem;">{{ log.opened_at.strftime('%m-%d %H:%M') }}</span>
+          {% if log.open_count and log.open_count > 1 %}<span class="muted">({{ log.open_count }}x)</span>{% endif %}
+        {% else %}
+          <span class="muted">No</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if log.clicked %}
+          <span class="badge badge-ok">Yes</span>
+          {% if log.clicked_at %}<span class="muted" style="font-size:0.75rem;">{{ log.clicked_at.strftime('%m-%d %H:%M') }}</span>{% endif %}
+        {% else %}
+          <span class="muted">No</span>
+        {% endif %}
+      </td>
+      <td>{{ log.account_used or '—' }}</td>
+      <td>
+        {% if log.status == 'sent' %}
+          <span class="badge badge-ok">Sent</span>
+        {% elif log.status == 'failed' %}
+          <span class="badge badge-unsubscribed">Failed</span>
+        {% else %}
+          {{ log.status }}
+        {% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="9" class="empty">No logs yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Settings — OutreachCommand{% endblock %}
+{% block content %}
+<h1>Settings</h1>
+
+<form method="post" class="card">
+  <h2>Sender & Content</h2>
+  <div class="form-group">
+    <label>Sender Name</label>
+    <input type="text" name="sender_name" value="{{ settings.sender_name }}">
+  </div>
+  <div class="form-group">
+    <label>Video / Link URL (Step 2 — {video_link})</label>
+    <input type="url" name="video_link_url" value="{{ settings.video_link_url }}">
+  </div>
+  <div class="form-group">
+    <label>Pitch Text</label>
+    <textarea name="pitch_text" rows="3">{{ settings.pitch_text }}</textarea>
+  </div>
+  <div class="form-group">
+    <label>Tracking Base URL</label>
+    <input type="url" name="tracking_base_url" value="{{ settings.tracking_base_url }}">
+  </div>
+  <div class="form-group">
+    <label>Warmup Addresses (comma separated)</label>
+    <input type="text" name="warmup_addresses" value="{{ settings.warmup_addresses }}">
+  </div>
+  <div class="form-group">
+    <label>Daily limit per account</label>
+    <input type="number" name="daily_limit_per_account" value="{{ settings.daily_limit_per_account }}" min="1">
+  </div>
+
+  <h2>Schedule</h2>
+  <div class="form-row">
+    <div class="form-group">
+      <label>Start Time</label>
+      <input type="time" name="send_window_start" value="{{ settings.send_window_start }}">
+    </div>
+    <div class="form-group">
+      <label>End Time</label>
+      <input type="time" name="send_window_end" value="{{ settings.send_window_end }}">
+    </div>
+    <div class="form-group">
+      <label>Timezone</label>
+      <select name="timezone">
+        {% for tz in timezones %}
+        <option value="{{ tz }}" {% if settings.timezone == tz %}selected{% endif %}>{{ tz }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+  <div class="form-group">
+    <label>Active Days</label>
+    <div class="checkbox-row">
+      {% for day in weekdays %}
+      <label><input type="checkbox" name="active_days" value="{{ day }}" {% if day in active_days %}checked{% endif %}> {{ day }}</label>
+      {% endfor %}
+    </div>
+  </div>
+
+  <button type="submit" class="btn btn-primary">Save Settings</button>
+</form>
+{% endblock %}

@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}Leads — OutreachCommand{% endblock %}
+{% block content %}
+<h1>Leads Management</h1>
+
+<form method="get" class="filter-bar" id="filter-form">
+  <input type="search" name="q" id="search-input" value="{{ q }}" placeholder="Search name, email, company..." class="search-input">
+  <select name="status" onchange="this.form.submit()">
+    <option value="all" {% if status == 'all' %}selected{% endif %}>All</option>
+    <option value="pending" {% if status == 'pending' %}selected{% endif %}>Pending</option>
+    <option value="active" {% if status == 'active' %}selected{% endif %}>Active</option>
+    <option value="complete" {% if status == 'complete' %}selected{% endif %}>Complete</option>
+    <option value="paused" {% if status == 'paused' %}selected{% endif %}>Paused</option>
+    <option value="unsubscribed" {% if status == 'unsubscribed' %}selected{% endif %}>Unsubscribed</option>
+    <option value="replied" {% if status == 'replied' %}selected{% endif %}>Replied</option>
+  </select>
+  <button type="submit" class="btn btn-secondary">Search</button>
+</form>
+
+<form method="post" action="{{ url_for('leads_bulk_delete') }}" id="bulk-form" onsubmit="return confirm('Delete selected leads?');">
+  <div class="table-actions">
+    <button type="submit" class="btn btn-danger">Delete Selected</button>
+    <span class="muted">Showing {{ start }}–{{ end }} of {{ total }} leads</span>
+  </div>
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th><input type="checkbox" id="select-all" title="Select all"></th>
+        <th>Name</th>
+        <th>Email</th>
+        <th>Company</th>
+        <th>Step</th>
+        <th>Status</th>
+        <th>Last Sent</th>
+        <th>Account</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for lead in leads %}
+      <tr>
+        <td><input type="checkbox" name="lead_ids" value="{{ lead.id }}" class="lead-checkbox"></td>
+        <td>{{ lead.full_name }}</td>
+        <td>{{ lead.email }}</td>
+        <td>{{ lead.company or '—' }}</td>
+        <td>{{ lead.sequence_step }}/3</td>
+        <td><span class="badge badge-{{ lead.status_label().lower() }}">{{ lead.status_label() }}</span></td>
+        <td>{{ lead.last_sent_at.strftime('%Y-%m-%d %H:%M') if lead.last_sent_at else '—' }}</td>
+        <td>{{ lead.assigned_account or '—' }}</td>
+        <td class="actions">
+          {% if lead.paused %}
+          <form method="post" action="{{ url_for('lead_resume', lead_id=lead.id) }}" style="display:inline;">
+            <button type="submit" class="btn btn-sm btn-primary">Resume</button>
+          </form>
+          {% else %}
+          <form method="post" action="{{ url_for('lead_pause', lead_id=lead.id) }}" style="display:inline;">
+            <button type="submit" class="btn btn-sm btn-secondary">Pause</button>
+          </form>
+          {% endif %}
+          <form method="post" action="{{ url_for('lead_delete', lead_id=lead.id) }}" style="display:inline;" onsubmit="return confirm('Delete this lead?');">
+            <button type="submit" class="btn btn-sm btn-danger" title="Delete">&#128465;</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="9" class="empty">No leads found.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</form>
+
+{% if pages > 1 %}
+<div class="pagination">
+  {% if page > 1 %}
+    <a href="?page={{ page - 1 }}&q={{ q }}&status={{ status }}">&laquo;</a>
+  {% endif %}
+  {% for p in range(1, pages + 1) %}
+    {% if p == page %}
+      <a href="?page={{ p }}&q={{ q }}&status={{ status }}" class="active">{{ p }}</a>
+    {% elif p <= 3 or p >= pages - 2 or (p >= page - 2 and p <= page + 2) %}
+      <a href="?page={{ p }}&q={{ q }}&status={{ status }}">{{ p }}</a>
+    {% elif p == 4 or p == pages - 3 %}
+      <span class="muted">…</span>
+    {% endif %}
+  {% endfor %}
+  {% if page < pages %}
+    <a href="?page={{ page + 1 }}&q={{ q }}&status={{ status }}">&raquo;</a>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('select-all').addEventListener('change', function() {
+  document.querySelectorAll('.lead-checkbox').forEach(cb => cb.checked = this.checked);
+});
+
+// Live search with debounce
+let searchTimer;
+document.getElementById('search-input').addEventListener('input', function() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    document.getElementById('filter-form').submit();
+  }, 500);
+});
+</script>
+{% endblock %}

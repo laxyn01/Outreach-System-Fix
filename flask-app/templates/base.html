@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}OutreachCommand{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="logo">OutreachCommand</div>
+      <nav>
+        <a href="{{ url_for('dashboard') }}" class="{% if request.endpoint == 'dashboard' %}active{% endif %}">Dashboard</a>
+        <a href="{{ url_for('leads_page') }}" class="{% if request.endpoint == 'leads_page' %}active{% endif %}">Leads</a>
+        <a href="{{ url_for('upload') }}" class="{% if request.endpoint == 'upload' %}active{% endif %}">Upload Leads</a>
+        <a href="{{ url_for('accounts') }}" class="{% if request.endpoint == 'accounts' %}active{% endif %}">Email Accounts</a>
+        <a href="{{ url_for('templates_page') }}" class="{% if request.endpoint == 'templates_page' %}active{% endif %}">Templates</a>
+        <a href="{{ url_for('logs_page') }}" class="{% if request.endpoint == 'logs_page' %}active{% endif %}">Email Logs</a>
+        <a href="{{ url_for('settings_page') }}" class="{% if request.endpoint == 'settings_page' %}active{% endif %}">Settings</a>
+      </nav>
+    </aside>
+    <main class="content">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <div class="flash flash-{{ category }}">{{ message }}</div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

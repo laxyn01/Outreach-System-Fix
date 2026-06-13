@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Templates — OutreachCommand{% endblock %}
+{% block content %}
+<h1>Email Templates</h1>
+
+<div class="card">
+  <h2>Create Template</h2>
+  <form method="post">
+    <div class="form-row">
+      <div class="form-group">
+        <label>Name</label>
+        <input type="text" name="name" required>
+      </div>
+      <div class="form-group">
+        <label>Step</label>
+        <select name="step">
+          <option value="1">Step 1</option>
+          <option value="2">Step 2</option>
+          <option value="3">Step 3</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Subject</label>
+      <input type="text" name="subject" required placeholder="Use {first_name}, {company}, spintax {Hi|Hello}">
+    </div>
+    <div class="form-group">
+      <label>Body</label>
+      <textarea name="body" rows="8" required></textarea>
+    </div>
+    <label><input type="checkbox" name="is_html"> HTML email</label>
+    <button type="submit" class="btn btn-primary">Create Template</button>
+  </form>
+</div>
+
+<table class="data-table">
+  <thead>
+    <tr><th>Name</th><th>Step</th><th>Subject</th><th>Actions</th></tr>
+  </thead>
+  <tbody>
+    {% for t in templates %}
+    <tr>
+      <td>{{ t.name }}</td>
+      <td>{{ t.step }}</td>
+      <td>{{ t.subject[:60] }}{% if t.subject|length > 60 %}...{% endif %}</td>
+      <td>
+        <button type="button" class="btn btn-sm btn-secondary preview-btn" data-id="{{ t.id }}">Preview</button>
+        <form method="post" action="{{ url_for('template_delete', template_id=t.id) }}" style="display:inline;" onsubmit="return confirm('Delete?');">
+          <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="4" class="empty">No templates. Defaults used at send time.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<div id="preview-modal" class="modal hidden">
+  <div class="modal-content">
+    <h2>Template Preview</h2>
+    <p><strong>Subject:</strong> <span id="preview-subject"></span></p>
+    <div id="preview-body" class="preview-body"></div>
+    <button type="button" class="btn btn-secondary" onclick="document.getElementById('preview-modal').classList.add('hidden')">Close</button>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.querySelectorAll('.preview-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const res = await fetch('/templates/' + btn.dataset.id + '/preview');
+    const data = await res.json();
+    document.getElementById('preview-subject').textContent = data.subject || data.error;
+    const bodyEl = document.getElementById('preview-body');
+    if (data.is_html) {
+      bodyEl.innerHTML = data.body;
+    } else {
+      bodyEl.textContent = data.body;
+    }
+    document.getElementById('preview-modal').classList.remove('hidden');
+  });
+});
+</script>
+{% endblock %}

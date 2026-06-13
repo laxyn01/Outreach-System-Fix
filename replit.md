@@ -1,36 +1,45 @@
-# [Project name]
+# OutreachCommand
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Cold email outreach system — manages leads, sends 3-step email sequences, tracks opens/clicks, handles unsubscribes and reply detection.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- `cd flask-app && python app.py` — run the Flask app (port 5000, workflow: "OutreachCommand (Flask)")
+- `pnpm --filter @workspace/api-server run dev` — run the Node API server (port 8080, unused by Flask app)
+- Required env: none required (SQLite DB created automatically at `flask-app/leads.db`)
+- Optional env: `FLASK_SECRET_KEY`, `TRACKING_BASE_URL`, `PORT`
 
 ## Stack
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- Python 3.11, Flask 3, Flask-SQLAlchemy, APScheduler
+- DB: SQLite via SQLAlchemy (file: `flask-app/leads.db`)
+- Email: smtplib STARTTLS (Gmail app passwords)
+- IMAP: imaplib for reply detection
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `flask-app/app.py` — all routes and Flask app factory
+- `flask-app/models.py` — SQLAlchemy models (Lead, EmailAccount, Template, EmailLog, Settings)
+- `flask-app/email_sender.py` — SMTP send logic, warmup, preview
+- `flask-app/sequence.py` — lead picking, account selection, send window logic
+- `flask-app/tracker.py` — placeholder replacement, link wrapping, tracking pixel injection
+- `flask-app/spintax.py` — spintax parser
+- `flask-app/imap_replies.py` — IMAP reply checker
+- `flask-app/scheduler.py` — APScheduler background jobs
+- `flask-app/templates/` — Jinja2 HTML templates
+- `flask-app/static/style.css` — all styles
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- SQLite used for simplicity; swap DATABASE_PATH in models.py for PostgreSQL URI if needed
+- Upload preview passes rows as JSON in a hidden form field (json.dumps default=str) rather than session storage
+- Scheduler runs every 60s but respects a per-send rate limit of 60–120s between emails
+- Tracking pixel and click wrapping injected at send time using the base URL from Settings
+- All placeholder replacement happens AFTER spintax parsing to avoid conflicts
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+Dashboard → upload CSV leads → configure email accounts (Gmail SMTP) → set 3 email templates → scheduler auto-sends step 1/2/3 with 3-day and 4-day gaps → tracks opens (pixel), clicks (redirect), replies (IMAP daily scan) → unsubscribe link in every email.
 
 ## User preferences
 
@@ -38,8 +47,11 @@ _Populate as you build — explicit user instructions worth remembering across s
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Gmail requires App Passwords (not account password) — enable 2FA then create one in Google account security
+- TRACKING_BASE_URL must be your public domain for open/click tracking to work in real emails
+- APScheduler runs in-process; if you use gunicorn with multiple workers, set up an external scheduler
+- Warmup emails go to warmup_addresses from Settings; leave blank to skip warmup
 
 ## Pointers
 
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+- See the `pnpm-workspace` skill for the Node.js workspace structure (separate from Flask app)

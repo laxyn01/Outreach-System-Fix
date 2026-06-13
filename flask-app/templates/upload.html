@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Upload Leads — OutreachCommand{% endblock %}
+{% block content %}
+<h1>Upload Leads</h1>
+<p class="muted">CSV columns: first_name, last_name, email, company. Also accepts .xlsx/.xls files.</p>
+
+{% if not show_preview %}
+<div class="card">
+  <form method="post" enctype="multipart/form-data">
+    <input type="hidden" name="action" value="preview">
+    <div class="form-group">
+      <label>CSV or Excel File</label>
+      <input type="file" name="file" accept=".csv,.xlsx,.xls" required>
+    </div>
+    <button type="submit" class="btn btn-primary">Preview Import</button>
+  </form>
+</div>
+{% else %}
+<p>Preview <strong>{{ preview_rows|length }}</strong> leads{% if skipped %} ({{ skipped }} invalid/duplicate rows skipped){% endif %}</p>
+<div style="max-height:400px;overflow-y:auto;margin-bottom:1rem;">
+<table class="data-table">
+  <thead>
+    <tr><th>First Name</th><th>Last Name</th><th>Email</th><th>Company</th></tr>
+  </thead>
+  <tbody>
+    {% for row in preview_rows %}
+    <tr>
+      <td>{{ row.first_name or '—' }}</td>
+      <td>{{ row.last_name or '—' }}</td>
+      <td>{{ row.email }}</td>
+      <td>{{ row.company or '—' }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+<form method="post">
+  <input type="hidden" name="action" value="confirm">
+  <input type="hidden" name="rows_data" value="{{ rows_json }}">
+  <div class="actions-row">
+    <button type="submit" class="btn btn-primary">Confirm Import {{ preview_rows|length }} Leads</button>
+    <a href="{{ url_for('upload') }}" class="btn btn-secondary">Cancel</a>
+  </div>
+</form>
+{% endif %}
+{% endblock %}
