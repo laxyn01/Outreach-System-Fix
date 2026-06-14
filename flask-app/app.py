@@ -35,6 +35,21 @@ load_dotenv()
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'dev-secret-change-me')
 
+# FIX 3 — IST template filter
+from zoneinfo import ZoneInfo as _ZoneInfo
+_IST = _ZoneInfo('Asia/Kolkata')
+
+def _fmt_ist(dt):
+    if dt is None:
+        return '—'
+    from datetime import timezone as _tz
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_tz.utc)
+    local = dt.astimezone(_IST)
+    return local.strftime('%b %d, %Y %H:%M IST')
+
+app.jinja_env.filters['ist'] = _fmt_ist
+
 init_db(app)
 
 
@@ -235,6 +250,23 @@ def campaign_delete(campaign_id):
     db.session.commit()
     flash('Campaign deleted.', 'success')
     return redirect(url_for('campaigns_page'))
+
+
+# FIX 5 — Global Pause All / Resume All
+@app.route('/campaigns/pause-all', methods=['POST'])
+def campaigns_pause_all():
+    Campaign.query.filter_by(status='active').update({'status': 'paused'})
+    db.session.commit()
+    flash('All active campaigns paused.', 'success')
+    return redirect(url_for('dashboard'))
+
+
+@app.route('/campaigns/resume-all', methods=['POST'])
+def campaigns_resume_all():
+    Campaign.query.filter_by(status='paused').update({'status': 'active'})
+    db.session.commit()
+    flash('All paused campaigns resumed.', 'success')
+    return redirect(url_for('dashboard'))
 
 
 # ─── Campaign Edit (FIX 3) ───────────────────────────────────────────────────

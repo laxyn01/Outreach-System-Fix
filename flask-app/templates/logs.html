@@ -43,17 +43,17 @@
         <td class="text-gray text-sm">{{ log.lead_email or '—' }}</td>
         <td class="text-gray" title="{{ log.subject or '' }}">{{ (log.subject or '—')[:45] }}{% if log.subject and log.subject|length > 45 %}…{% endif %}</td>
         <td><span class="badge badge-{% if log.step==1 %}blue{% elif log.step==2 %}yellow{% else %}gray{% endif %}">{{ log.step }}</span></td>
-        <td class="muted">{{ log.sent_at.strftime('%b %d %H:%M') if log.sent_at else '—' }}</td>
+        <td class="muted">{{ log.sent_at|ist }}</td>
         <td>
           {% if log.opened_at %}
             <span class="badge badge-green">{% if log.open_count and log.open_count > 1 %}{{ log.open_count }}x{% else %}1x{% endif %}</span>
-            <div class="muted" style="font-size:11px;margin-top:2px;">{{ log.opened_at.strftime('%b %d %H:%M') }}</div>
+            <div class="muted" style="font-size:11px;margin-top:2px;">{{ log.opened_at|ist }}</div>
           {% else %}<span class="muted">No</span>{% endif %}
         </td>
         <td>
           {% if log.clicked %}
             <span class="badge badge-green">Yes</span>
-            {% if log.clicked_at %}<span class="muted" style="font-size:11px;">{{ log.clicked_at.strftime('%b %d') }}</span>{% endif %}
+            {% if log.clicked_at %}<div class="muted" style="font-size:11px;margin-top:2px;">{{ log.clicked_at|ist }}</div>{% endif %}
           {% else %}<span class="muted">—</span>{% endif %}
         </td>
         <td class="muted text-xs">{{ log.account_used or '—' }}</td>

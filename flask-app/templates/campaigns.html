@@ -53,11 +53,27 @@
             </a>
             {% if c.status == 'active' %}
             <form method="post" action="{{ url_for('campaign_pause', campaign_id=c.id) }}" style="display:inline;">
-              <button type="submit" class="btn btn-xs btn-secondary">Pause</button>
+              <button type="submit" class="btn btn-xs btn-warning">
+                <i class="fa-solid fa-pause"></i> Pause
+              </button>
             </form>
-            {% elif c.status in ['paused', 'draft'] %}
+            {% elif c.status == 'paused' %}
             <form method="post" action="{{ url_for('campaign_resume', campaign_id=c.id) }}" style="display:inline;">
-              <button type="submit" class="btn btn-xs btn-primary">Launch</button>
+              <button type="submit" class="btn btn-xs btn-primary">
+                <i class="fa-solid fa-play"></i> Resume
+              </button>
+            </form>
+            {% elif c.status == 'draft' %}
+            <form method="post" action="{{ url_for('campaign_resume', campaign_id=c.id) }}" style="display:inline;">
+              <button type="submit" class="btn btn-xs btn-primary">
+                <i class="fa-solid fa-rocket"></i> Launch
+              </button>
+            </form>
+            {% elif c.status == 'complete' %}
+            <form method="post" action="{{ url_for('campaign_resume', campaign_id=c.id) }}" style="display:inline;">
+              <button type="submit" class="btn btn-xs btn-secondary">
+                <i class="fa-solid fa-rotate-right"></i> Restart
+              </button>
             </form>
             {% endif %}
             <form method="post" action="{{ url_for('campaign_delete', campaign_id=c.id) }}" style="display:inline;"

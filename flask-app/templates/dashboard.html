@@ -10,6 +10,17 @@
       <i class="fa-solid fa-inbox"></i> Check Replies
     </button>
   </form>
+  <!-- FIX 5: Global Pause All / Resume All -->
+  <form method="post" action="{{ url_for('campaigns_pause_all') }}" style="display:inline;">
+    <button type="submit" class="btn btn-warning btn-sm" title="Pause all active campaigns">
+      <i class="fa-solid fa-pause"></i> Pause All
+    </button>
+  </form>
+  <form method="post" action="{{ url_for('campaigns_resume_all') }}" style="display:inline;">
+    <button type="submit" class="btn btn-secondary btn-sm" title="Resume all paused campaigns">
+      <i class="fa-solid fa-play"></i> Resume All
+    </button>
+  </form>
 {% endblock %}
 
 {% block content %}
@@ -114,12 +125,12 @@
         <td>{{ log.lead_name or log.lead_email or '—' }}</td>
         <td class="text-gray">{{ (log.subject or '—')[:50] }}</td>
         <td>{{ log.step }}</td>
-        <td class="muted">{{ log.sent_at.strftime('%b %d %H:%M') if log.sent_at else '—' }}</td>
+        <td class="muted">{{ log.sent_at|ist }}</td>
         <td><span class="badge badge-{{ log.status }}">{{ log.status }}</span></td>
         <td>
           {% if log.opened_at %}
             <span class="badge badge-green">{% if log.open_count and log.open_count > 1 %}{{ log.open_count }}x{% else %}1x{% endif %}</span>
-            <div class="muted" style="font-size:11px;margin-top:2px;">{{ log.opened_at.strftime('%b %d %H:%M') }}</div>
+            <div class="muted" style="font-size:11px;margin-top:2px;">{{ log.opened_at|ist }}</div>
           {% else %}<span class="muted">No</span>{% endif %}
         </td>
       </tr>

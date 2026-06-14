@@ -380,7 +380,7 @@ function renderStepList() {
         ${idx === 0 ? '<span style="font-size:11px;color:#6b7280;">Immediately</span>' : `<span style="font-size:11px;color:#6b7280;">+${step.wait_days}d</span>`}
         ${varCount > 1 ? `<span style="font-size:10px;background:#dbeafe;color:#1e40af;border-radius:4px;padding:1px 5px;">A/B ×${varCount}</span>` : ''}
       </div>`;
-    div.addEventListener('click', () => { selStep = idx; selVariant = 0; render(); });
+    div.addEventListener('click', () => { saveCurrentVariant(); selStep = idx; selVariant = 0; render(); });
     el.appendChild(div);
   });
 }
@@ -396,7 +396,7 @@ function renderEditor() {
 
   // Variant tabs HTML
   let vtabs = step.variants.map((v, i) => `
-    <span class="variant-tab ${i === selVariant ? 'active' : ''}" onclick="selVariant=${i};saveCurrentVariant();render();">
+    <span class="variant-tab ${i === selVariant ? 'active' : ''}" onclick="switchVariant(${i})">
       ${String.fromCharCode(65 + i)}
     </span>
   `).join('');
@@ -462,6 +462,13 @@ function saveCurrentVariant() {
   const body = document.getElementById('step-body');
   if (subj && steps[selStep]) steps[selStep].variants[selVariant].subject = subj.value;
   if (body && steps[selStep]) steps[selStep].variants[selVariant].body = body.value;
+}
+
+// FIX 1: save into CURRENT selVariant BEFORE switching to preserve independent subjects/bodies
+function switchVariant(newIdx) {
+  saveCurrentVariant();  // flush DOM → steps[selStep].variants[selVariant]
+  selVariant = newIdx;   // then switch
+  renderEditor();        // re-render editor panel only
 }
 
 function addStep() {

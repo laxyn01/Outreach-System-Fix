@@ -32,13 +32,17 @@ def is_within_send_window(settings: Settings, now_utc: datetime) -> bool:
 
 
 def pick_next_lead(now: datetime) -> 'Lead | None':
+    # FIX 2/4: only send to leads in active campaigns (or no campaign assigned)
+    from models import Campaign
     return (
-        Lead.query.filter(
+        Lead.query.outerjoin(Campaign, Lead.campaign_id == Campaign.id)
+        .filter(
             Lead.unsubscribed.is_(False),
             Lead.replied.is_(False),
             Lead.paused.is_(False),
             Lead.sequence_step < 3,
             or_(Lead.next_send_at.is_(None), Lead.next_send_at <= now),
+            or_(Lead.campaign_id.is_(None), Campaign.status == 'active'),
         )
         .order_by(Lead.id)
         .first()

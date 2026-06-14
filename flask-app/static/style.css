@@ -206,6 +206,8 @@ body {
 .btn-secondary:hover { background: #e5e7eb; }
 .btn-danger { background: #dc2626; color: #fff; }
 .btn-danger:hover { background: #b91c1c; }
+.btn-warning { background: #d97706; color: #fff; }
+.btn-warning:hover { background: #b45309; }
 .btn-ghost { background: transparent; color: #6b7280; }
 .btn-ghost:hover { background: #f3f4f6; color: #111827; }
 .btn-sm { padding: 5px 10px; font-size: 12px; }
