@@ -22,6 +22,7 @@ from models import Campaign, EmailAccount, EmailLog, Lead, Settings, Template, d
 from email_sender import (
     clean_email,
     preview_template,
+    preview_step_content,
     send_test_email,
     try_send_next_email,
 )
@@ -234,6 +235,142 @@ def campaign_delete(campaign_id):
     db.session.commit()
     flash('Campaign deleted.', 'success')
     return redirect(url_for('campaigns_page'))
+
+
+# ─── Campaign Edit (FIX 3) ───────────────────────────────────────────────────
+
+def _get_campaign_analytics(campaign_id):
+    """Per-campaign stats for the Analytics tab."""
+    logs = EmailLog.query.filter_by(campaign_id=campaign_id, log_type='campaign').all()
+    total_sent = len(logs)
+    total_opened = sum(1 for l in logs if l.opened_at)
+    total_clicked = sum(1 for l in logs if l.clicked)
+    lead_ids = [l.lead_id for l in logs if l.lead_id]
+    total_replied = Lead.query.filter(Lead.id.in_(lead_ids), Lead.replied.is_(True)).count() if lead_ids else 0
+    open_rate = round(total_opened / total_sent * 100, 1) if total_sent else 0
+    click_rate = round(total_clicked / total_sent * 100, 1) if total_sent else 0
+    reply_rate = round(total_replied / total_sent * 100, 1) if total_sent else 0
+
+    from sqlalchemy import func
+    daily = db.session.query(
+        func.date(EmailLog.sent_at).label('day'),
+        func.count(EmailLog.id).label('sent'),
+        func.sum(db.case((EmailLog.opened_at.isnot(None), 1), else_=0)).label('opened'),
+    ).filter_by(campaign_id=campaign_id, log_type='campaign').group_by(
+        func.date(EmailLog.sent_at)
+    ).order_by(func.date(EmailLog.sent_at)).all()
+
+    return {
+        'total_sent': total_sent, 'total_opened': total_opened,
+        'total_clicked': total_clicked, 'total_replied': total_replied,
+        'open_rate': open_rate, 'click_rate': click_rate, 'reply_rate': reply_rate,
+        'chart_labels': json.dumps([str(r.day) for r in daily]),
+        'chart_sent': json.dumps([int(r.sent or 0) for r in daily]),
+        'chart_opened': json.dumps([int(r.opened or 0) for r in daily]),
+    }
+
+
+@app.route('/campaigns/<int:campaign_id>/edit', methods=['GET', 'POST'])
+def campaign_edit(campaign_id):
+    campaign = Campaign.query.get_or_404(campaign_id)
+    tab = request.args.get('tab', 'analytics')
+
+    if request.method == 'POST':
+        action = request.form.get('action', '')
+
+        if action == 'save_sequence':
+            raw = request.form.get('steps_json', '[]').strip()
+            try:
+                json.loads(raw)  # validate
+                campaign.steps_json = raw
+            except Exception:
+                flash('Invalid sequence JSON.', 'error')
+                return redirect(url_for('campaign_edit', campaign_id=campaign_id, tab='sequences'))
+            db.session.commit()
+            flash('Sequence saved.', 'success')
+            return redirect(url_for('campaign_edit', campaign_id=campaign_id, tab='sequences'))
+
+        elif action == 'save_schedule':
+            campaign.campaign_schedule_start = request.form.get('schedule_start', '').strip()
+            campaign.campaign_schedule_end = request.form.get('schedule_end', '').strip()
+            campaign.campaign_timezone = request.form.get('timezone', '').strip()
+            days = request.form.getlist('active_days')
+            campaign.campaign_active_days = ','.join(days)
+            db.session.commit()
+            flash('Schedule saved.', 'success')
+            return redirect(url_for('campaign_edit', campaign_id=campaign_id, tab='schedule'))
+
+        elif action == 'save_options':
+            campaign.campaign_daily_limit = request.form.get('daily_limit', 0, type=int)
+            campaign.tracking_enabled = request.form.get('tracking_enabled') == 'on'
+            campaign.stop_on_reply = request.form.get('stop_on_reply') == 'on'
+            db.session.commit()
+            flash('Options saved.', 'success')
+            return redirect(url_for('campaign_edit', campaign_id=campaign_id, tab='options'))
+
+        elif action == 'add_leads':
+            imported = 0
+            if 'file' in request.files and request.files['file'].filename:
+                rows = _parse_upload_file(request.files['file'])
+                for row in rows:
+                    email = clean_email(row.get('email', ''))
+                    if not email:
+                        continue
+                    existing = Lead.query.filter_by(email=email).first()
+                    if existing:
+                        if not existing.campaign_id:
+                            existing.campaign_id = campaign_id
+                    else:
+                        db.session.add(Lead(
+                            first_name=row.get('first_name', ''),
+                            last_name=row.get('last_name', ''),
+                            email=email,
+                            company=row.get('company', ''),
+                            campaign_id=campaign_id,
+                        ))
+                        imported += 1
+            db.session.commit()
+            flash(f'Imported {imported} leads.', 'success')
+            return redirect(url_for('campaign_edit', campaign_id=campaign_id, tab='leads'))
+
+        elif action == 'rename':
+            new_name = request.form.get('name', '').strip()
+            if new_name:
+                campaign.name = new_name
+                db.session.commit()
+                flash('Campaign renamed.', 'success')
+            return redirect(url_for('campaign_edit', campaign_id=campaign_id, tab='analytics'))
+
+    analytics = _get_campaign_analytics(campaign_id)
+    campaign_leads = Lead.query.filter_by(campaign_id=campaign_id).order_by(Lead.id.desc()).all()
+    timezones = [
+        'Asia/Kolkata', 'America/New_York', 'America/Los_Angeles',
+        'America/Chicago', 'Europe/London', 'Europe/Berlin',
+        'Asia/Dubai', 'Asia/Singapore', 'Asia/Tokyo', 'UTC',
+    ]
+    weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+    active_days = [d.strip() for d in (campaign.campaign_active_days or '').split(',') if d.strip()]
+
+    return render_template(
+        'campaign_edit.html',
+        campaign=campaign,
+        tab=tab,
+        analytics=analytics,
+        campaign_leads=campaign_leads,
+        timezones=timezones,
+        weekdays=weekdays,
+        active_days=active_days,
+        steps_json=campaign.steps_json or '[]',
+    )
+
+
+@app.route('/campaigns/<int:campaign_id>/preview-step', methods=['POST'])
+def campaign_preview_step(campaign_id):
+    data = request.get_json() or {}
+    subject = data.get('subject', '')
+    body = data.get('body', '')
+    step = data.get('step', 1)
+    return jsonify(preview_step_content(subject, body, step))
 
 
 # ─── Analytics ──────────────────────────────────────────────────────────────
@@ -709,21 +846,25 @@ TRACKING_GIF = base64.b64decode('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAE
 
 @app.route('/track/open/<int:lead_id>/<int:step>')
 def track_open(lead_id, step):
-    lead = Lead.query.get(lead_id)
-    if lead:
-        lead.opened = True
-        if not lead.opened_at:
-            lead.opened_at = datetime.utcnow()
-        log = EmailLog.query.filter_by(lead_id=lead_id, step=step).order_by(EmailLog.sent_at.desc()).first()
-        if log:
-            log.opened_at = log.opened_at or datetime.utcnow()
-            log.open_count = (log.open_count or 0) + 1
-        db.session.commit()
-    # Bug fix #8: Cache-Control headers so pixel fires every open
+    # FIX 4: build response FIRST, wrap DB ops in try/except — pixel always returns
     response = Response(TRACKING_GIF, mimetype='image/gif')
     response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '0'
+    try:
+        lead = Lead.query.get(lead_id)
+        if lead:
+            lead.opened = True
+            lead.opened_at = datetime.utcnow()
+            log = EmailLog.query.filter_by(lead_id=lead_id, step=step).order_by(
+                EmailLog.sent_at.desc()
+            ).first()
+            if log:
+                log.opened_at = datetime.utcnow()
+                log.open_count = (log.open_count or 0) + 1
+            db.session.commit()
+    except Exception:
+        pass
     return response
 
 

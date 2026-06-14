@@ -1,0 +1,61 @@
+Fix these 4 things:
+
+FIX 1 - Sender name showing "Your Name" instead of actual name:
+In Settings page, make sure sender_name field saves to DB properly on form submit.
+In email_sender.py, fetch sender_name fresh from Settings table before every send:
+settings = Settings.query.first()
+sender_name = settings.sender_name if settings and settings.sender_name else 'Your Name'
+Then use formataddr: msg['From'] = formataddr((sender_name, account.email_address))
+
+FIX 2 - Campaign sequence editor like Instantly:
+In campaign creation and edit page, add a Sequences tab with this UI:
+- Left panel shows steps: Step 1, Step 2, Step 3, Step 4 (add more with + Add Step button)
+- Each step card shows: subject preview, "Add variant" button, "wait for X days then" input
+- Right panel is email editor for selected step with: Subject field, rich text body area, toolbar with Bold/Italic/Link/Image/Emoji buttons
+- "Add variant" adds alternate version of same step - system randomly picks one variant per lead (A/B testing)
+- Each step has settings icon for wait days and trash icon to delete
+- Save button top right saves entire sequence to DB
+- Campaign model needs: steps stored as JSON array with each step having subject, body, variants array, wait_days
+- When sending, pick current step based on lead.sequence_step, pick random variant if multiple exist
+
+FIX 3 - Campaign edit after launch:
+Add Edit button on campaigns list page for each campaign
+/campaigns/<id>/edit page with same 4 tabs: Analytics, Leads, Sequences, Schedule, Options
+Analytics tab shows campaign-specific stats
+Leads tab shows all leads in this campaign with status
+Sequences tab is the editor from FIX 2
+Schedule tab: start time, end time, days, timezone, delay between emails
+Options tab: daily limit, tracking on/off, stop on reply on/off
+
+FIX 4 - Tracker not working:
+The tracking pixel URL needs TRACKING_BASE_URL set correctly.
+In Settings page add Tracking URL field - default should be the current Replit URL.
+On app startup, auto-detect and set tracking URL if not set:
+import os
+tracking_url = os.environ.get('TRACKING_BASE_URL', request.host_url.rstrip('/'))
+
+Fix /track/open/<lead_id>/<step> route completely:
+@app.route('/track/open/<int:lead_id>/<int:step>')
+def track_open(lead_id, step):
+    import base64
+    from flask import Response
+    gif_bytes = base64.b64decode("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7")
+    response = Response(gif_bytes, mimetype='image/gif')
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    try:
+        lead = Lead.query.get(lead_id)
+        if lead:
+            lead.opened = True
+            lead.opened_at = datetime.utcnow()
+            log = EmailLog.query.filter_by(lead_id=lead_id, step=step).order_by(EmailLog.sent_at.desc()).first()
+            if log:
+                log.opened_at = datetime.utcnow()
+                log.open_count = (log.open_count or 0) + 1
+            db.session.commit()
+    except:
+        pass
+    return response
+
+Make sure tracking pixel is injected at very top of HTML email body before any other content.

@@ -8,6 +8,22 @@ db = SQLAlchemy()
 DATABASE_PATH = os.path.join(os.path.dirname(__file__), 'leads.db')
 
 
+def _detect_public_url():
+    """Auto-detect the public Replit domain for tracking URLs."""
+    env_url = os.getenv('TRACKING_BASE_URL')
+    if env_url:
+        return env_url
+    domains = os.getenv('REPLIT_DOMAINS', '').split(',')
+    for d in domains:
+        d = d.strip()
+        if d:
+            return f'https://{d}'
+    dev = os.getenv('REPLIT_DEV_DOMAIN', '').strip()
+    if dev:
+        return f'https://{dev}'
+    return None
+
+
 class Campaign(db.Model):
     __tablename__ = 'campaigns'
 
@@ -15,13 +31,34 @@ class Campaign(db.Model):
     name = db.Column(db.String(255), nullable=False)
     status = db.Column(db.String(50), default='draft')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # Legacy template FKs (still supported)
     template_step1_id = db.Column(db.Integer, db.ForeignKey('templates.id'), nullable=True)
     template_step2_id = db.Column(db.Integer, db.ForeignKey('templates.id'), nullable=True)
     template_step3_id = db.Column(db.Integer, db.ForeignKey('templates.id'), nullable=True)
+    # FIX 2: Steps stored as JSON array — each step: {id, wait_days, variants:[{subject,body}]}
+    steps_json = db.Column(db.Text, default='[]')
+    # Per-campaign schedule (overrides global settings when set)
+    campaign_schedule_start = db.Column(db.String(10), default='')
+    campaign_schedule_end = db.Column(db.String(10), default='')
+    campaign_timezone = db.Column(db.String(100), default='')
+    campaign_active_days = db.Column(db.String(100), default='')
+    campaign_daily_limit = db.Column(db.Integer, default=0)  # 0 = use global
+    tracking_enabled = db.Column(db.Boolean, default=True)
+    stop_on_reply = db.Column(db.Boolean, default=True)
 
     template_step1 = db.relationship('Template', foreign_keys=[template_step1_id])
     template_step2 = db.relationship('Template', foreign_keys=[template_step2_id])
     template_step3 = db.relationship('Template', foreign_keys=[template_step3_id])
+
+    def get_steps(self):
+        """Return parsed steps list from steps_json."""
+        import json
+        if not self.steps_json:
+            return []
+        try:
+            return json.loads(self.steps_json)
+        except Exception:
+            return []
 
     @property
     def leads_count(self):
@@ -183,11 +220,19 @@ class Settings(db.Model):
         row = cls.query.get(1)
         if not row:
             row = cls(id=1)
-            env_url = os.getenv('TRACKING_BASE_URL')
-            if env_url:
-                row.tracking_base_url = env_url
+            # FIX 4: auto-detect public URL on first create
+            auto_url = _detect_public_url()
+            if auto_url:
+                row.tracking_base_url = auto_url
             db.session.add(row)
             db.session.commit()
+        else:
+            # FIX 4: update if still at localhost default
+            if row.tracking_base_url in ('http://localhost:5000', ''):
+                auto_url = _detect_public_url()
+                if auto_url:
+                    row.tracking_base_url = auto_url
+                    db.session.commit()
         return row
 
 
@@ -197,7 +242,6 @@ def init_db(app):
     db.init_app(app)
     with app.app_context():
         db.create_all()
-        # Migrate: add new columns to existing tables if they don't exist
         _run_migrations()
         Settings.get_singleton()
 
@@ -206,6 +250,14 @@ def _run_migrations():
     migrations = [
         "ALTER TABLE leads ADD COLUMN campaign_id INTEGER REFERENCES campaigns(id)",
         "ALTER TABLE email_logs ADD COLUMN campaign_id INTEGER REFERENCES campaigns(id)",
+        "ALTER TABLE campaigns ADD COLUMN steps_json TEXT DEFAULT '[]'",
+        "ALTER TABLE campaigns ADD COLUMN campaign_schedule_start TEXT DEFAULT ''",
+        "ALTER TABLE campaigns ADD COLUMN campaign_schedule_end TEXT DEFAULT ''",
+        "ALTER TABLE campaigns ADD COLUMN campaign_timezone TEXT DEFAULT ''",
+        "ALTER TABLE campaigns ADD COLUMN campaign_active_days TEXT DEFAULT ''",
+        "ALTER TABLE campaigns ADD COLUMN campaign_daily_limit INTEGER DEFAULT 0",
+        "ALTER TABLE campaigns ADD COLUMN tracking_enabled INTEGER DEFAULT 1",
+        "ALTER TABLE campaigns ADD COLUMN stop_on_reply INTEGER DEFAULT 1",
     ]
     with db.engine.connect() as conn:
         for sql in migrations:

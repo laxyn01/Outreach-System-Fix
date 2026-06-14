@@ -1,0 +1,614 @@
+{% extends "base.html" %}
+{% block title %}{{ campaign.name }} — Edit{% endblock %}
+{% block page_title %}
+  <span style="color:#6b7280;font-weight:400;">Campaigns /</span> {{ campaign.name }}
+  <span class="badge badge-{{ campaign.status_color() }}" style="margin-left:8px;font-size:12px;">{{ campaign.status }}</span>
+{% endblock %}
+{% block topbar_actions %}
+  <a href="{{ url_for('campaigns_page') }}" class="btn btn-secondary btn-sm">
+    <i class="fa-solid fa-arrow-left"></i> Back
+  </a>
+  {% if campaign.status != 'active' %}
+  <form method="post" action="{{ url_for('campaign_resume', campaign_id=campaign.id) }}" style="display:inline;">
+    <button type="submit" class="btn btn-primary btn-sm">
+      <i class="fa-solid fa-rocket"></i> Launch
+    </button>
+  </form>
+  {% else %}
+  <form method="post" action="{{ url_for('campaign_pause', campaign_id=campaign.id) }}" style="display:inline;">
+    <button type="submit" class="btn btn-secondary btn-sm">
+      <i class="fa-solid fa-pause"></i> Pause
+    </button>
+  </form>
+  {% endif %}
+{% endblock %}
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  .tab-bar { display:flex; gap:0; border-bottom:2px solid #e5e7eb; margin-bottom:20px; }
+  .tab-btn {
+    padding:10px 18px; font-size:13px; font-weight:500; color:#6b7280;
+    background:none; border:none; cursor:pointer; border-bottom:2px solid transparent;
+    margin-bottom:-2px; transition:color 0.15s; font-family:inherit;
+  }
+  .tab-btn.active { color:#2563eb; border-bottom-color:#2563eb; }
+  .tab-panel { display:none; }
+  .tab-panel.active { display:block; }
+
+  /* Sequence editor */
+  .seq-layout { display:grid; grid-template-columns:220px 1fr; gap:0; border:1px solid #e5e7eb; border-radius:8px; overflow:hidden; min-height:520px; }
+  .seq-left { background:#f9fafb; border-right:1px solid #e5e7eb; display:flex; flex-direction:column; }
+  .seq-left-header { padding:12px 14px; border-bottom:1px solid #e5e7eb; font-size:12px; font-weight:600; color:#6b7280; text-transform:uppercase; letter-spacing:.05em; }
+  .step-item {
+    padding:12px 14px; cursor:pointer; border-left:3px solid transparent;
+    transition:background .15s; user-select:none;
+  }
+  .step-item:hover { background:#f0f0f0; }
+  .step-item.active { background:#fff; border-left-color:#2563eb; }
+  .step-item-title { font-size:13px; font-weight:600; color:#111; }
+  .step-item-sub { font-size:11px; color:#9ca3af; margin-top:2px; }
+  .step-item-meta { display:flex; align-items:center; justify-content:space-between; margin-top:4px; }
+  .step-add-btn { margin:10px 14px; }
+
+  .seq-right { background:#fff; display:flex; flex-direction:column; }
+  .seq-right-header { padding:12px 16px; border-bottom:1px solid #e5e7eb; display:flex; align-items:center; justify-content:space-between; }
+  .seq-right-body { padding:16px; flex:1; overflow-y:auto; }
+
+  .variant-tabs { display:flex; gap:4px; margin-bottom:12px; flex-wrap:wrap; align-items:center; }
+  .variant-tab {
+    padding:4px 12px; font-size:12px; font-weight:600;
+    border-radius:4px; cursor:pointer; border:1px solid #e5e7eb;
+    background:#f9fafb; color:#6b7280; transition:background .15s;
+  }
+  .variant-tab.active { background:#2563eb; color:#fff; border-color:#2563eb; }
+  .variant-tab.del-tab { color:#dc2626; font-size:11px; background:none; border:none; padding:4px 6px; }
+
+  .seq-toolbar { display:flex; gap:4px; margin-bottom:6px; }
+  .seq-toolbar button {
+    padding:4px 8px; font-size:12px; border:1px solid #e5e7eb;
+    border-radius:4px; background:#fff; cursor:pointer; color:#374151;
+    font-family:monospace;
+  }
+  .seq-toolbar button:hover { background:#f3f4f6; }
+  .seq-textarea { width:100%; padding:10px; border:1px solid #e5e7eb; border-radius:6px; font-size:13px; font-family:inherit; resize:vertical; min-height:180px; line-height:1.6; }
+  .seq-textarea:focus { outline:none; border-color:#2563eb; }
+
+  .wait-row { display:flex; align-items:center; gap:8px; margin-bottom:14px; font-size:13px; color:#374151; }
+  .wait-row input { width:60px; text-align:center; padding:5px 8px; border:1px solid #e5e7eb; border-radius:6px; font-size:13px; }
+  .empty-panel { padding:40px; text-align:center; color:#9ca3af; font-size:14px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Tab bar -->
+<div class="tab-bar">
+  <button class="tab-btn {% if tab == 'analytics' %}active{% endif %}" onclick="switchTab('analytics')">
+    <i class="fa-solid fa-chart-line"></i> Analytics
+  </button>
+  <button class="tab-btn {% if tab == 'leads' %}active{% endif %}" onclick="switchTab('leads')">
+    <i class="fa-solid fa-users"></i> Leads
+    <span style="font-size:11px;background:#e5e7eb;border-radius:8px;padding:1px 6px;margin-left:4px;">{{ campaign_leads|length }}</span>
+  </button>
+  <button class="tab-btn {% if tab == 'sequences' %}active{% endif %}" onclick="switchTab('sequences')">
+    <i class="fa-solid fa-envelope-open-text"></i> Sequences
+  </button>
+  <button class="tab-btn {% if tab == 'schedule' %}active{% endif %}" onclick="switchTab('schedule')">
+    <i class="fa-solid fa-clock"></i> Schedule
+  </button>
+  <button class="tab-btn {% if tab == 'options' %}active{% endif %}" onclick="switchTab('options')">
+    <i class="fa-solid fa-sliders"></i> Options
+  </button>
+</div>
+
+<!-- ── Analytics Tab ──────────────────────────────────────── -->
+<div class="tab-panel {% if tab == 'analytics' %}active{% endif %}" id="tab-analytics">
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-label"><span class="stat-dot dot-blue"></span>Sent</div>
+      <div class="stat-value">{{ analytics.total_sent }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label"><span class="stat-dot dot-yellow"></span>Open Rate</div>
+      <div class="stat-value">{{ analytics.open_rate }}%</div>
+      <div class="stat-sub">{{ analytics.total_opened }} opens</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label"><span class="stat-dot dot-purple"></span>Click Rate</div>
+      <div class="stat-value">{{ analytics.click_rate }}%</div>
+      <div class="stat-sub">{{ analytics.total_clicked }} clicks</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label"><span class="stat-dot dot-green"></span>Reply Rate</div>
+      <div class="stat-value">{{ analytics.reply_rate }}%</div>
+      <div class="stat-sub">{{ analytics.total_replied }} replies</div>
+    </div>
+  </div>
+  {% if analytics.total_sent > 0 %}
+  <div class="chart-wrap">
+    <div class="chart-title" style="margin-bottom:16px;">Activity Over Time</div>
+    <canvas id="campaignChart" height="80"></canvas>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <div class="empty-icon">📊</div>
+    <p>No sends yet for this campaign. Launch it to start tracking.</p>
+  </div>
+  {% endif %}
+
+  <!-- Rename -->
+  <div class="card" style="max-width:440px;margin-top:16px;">
+    <div class="card-title">Rename Campaign</div>
+    <form method="post">
+      <input type="hidden" name="action" value="rename">
+      <div style="display:flex;gap:8px;">
+        <input type="text" name="name" class="form-control" value="{{ campaign.name }}" required>
+        <button type="submit" class="btn btn-primary btn-sm" style="white-space:nowrap;">Rename</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── Leads Tab ──────────────────────────────────────────── -->
+<div class="tab-panel {% if tab == 'leads' %}active{% endif %}" id="tab-leads">
+  <div class="section-header">
+    <span class="section-title">{{ campaign_leads|length }} Lead(s)</span>
+    <button class="btn btn-primary btn-sm" onclick="document.getElementById('add-leads-modal').classList.remove('hidden')">
+      <i class="fa-solid fa-upload"></i> Add Leads
+    </button>
+  </div>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr><th>Name</th><th>Email</th><th>Company</th><th>Step</th><th>Status</th><th>Last Sent</th></tr>
+      </thead>
+      <tbody>
+        {% for lead in campaign_leads %}
+        <tr>
+          <td class="font-medium">{{ lead.full_name }}</td>
+          <td class="text-gray">{{ lead.email }}</td>
+          <td class="text-gray">{{ lead.company or '—' }}</td>
+          <td>{{ lead.sequence_step }}/3</td>
+          <td><span class="badge badge-{{ lead.status_label().lower() }}">{{ lead.status_label() }}</span></td>
+          <td class="muted">{{ lead.last_sent_at.strftime('%b %d') if lead.last_sent_at else '—' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="empty-state"><p>No leads in this campaign yet.</p></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Add leads modal -->
+  <div class="modal-backdrop hidden" id="add-leads-modal">
+    <div class="modal-box">
+      <div class="modal-title"><i class="fa-solid fa-upload"></i> Add Leads to Campaign</div>
+      <form method="post" enctype="multipart/form-data">
+        <input type="hidden" name="action" value="add_leads">
+        <div class="form-group">
+          <label class="form-label">CSV / Excel File</label>
+          <input type="file" name="file" accept=".csv,.xlsx,.xls" required class="form-control">
+        </div>
+        <p class="muted">Columns: email, first_name, last_name, company (or name / full_name)</p>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="document.getElementById('add-leads-modal').classList.add('hidden')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Upload & Add</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ── Sequences Tab ──────────────────────────────────────── -->
+<div class="tab-panel {% if tab == 'sequences' %}active{% endif %}" id="tab-sequences">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+    <div>
+      <span class="section-title">Email Sequence</span>
+      <span class="muted" style="margin-left:8px;">Click a step to edit. Add variants for A/B testing.</span>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-secondary btn-sm" id="preview-btn" onclick="doPreview()">
+        <i class="fa-solid fa-eye"></i> Preview
+      </button>
+      <button class="btn btn-primary btn-sm" onclick="saveSequence()">
+        <i class="fa-solid fa-floppy-disk"></i> Save Sequence
+      </button>
+    </div>
+  </div>
+
+  <div class="seq-layout">
+    <!-- Left panel: step list -->
+    <div class="seq-left">
+      <div class="seq-left-header">Steps</div>
+      <div id="step-list"></div>
+      <div class="step-add-btn">
+        <button class="btn btn-secondary btn-sm" style="width:100%;" onclick="addStep()">
+          <i class="fa-solid fa-plus"></i> Add Step
+        </button>
+      </div>
+    </div>
+    <!-- Right panel: editor -->
+    <div class="seq-right">
+      <div id="seq-editor">
+        <div class="empty-panel">Select a step from the left to start editing.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hidden form for save -->
+  <form method="post" id="seq-form" style="display:none;">
+    <input type="hidden" name="action" value="save_sequence">
+    <input type="hidden" name="steps_json" id="seq-json-input">
+  </form>
+
+  <!-- Preview result -->
+  <div id="preview-result" class="hidden" style="margin-top:16px;border:1px solid #e5e7eb;border-radius:8px;padding:16px;background:#f9fafb;">
+    <div style="font-size:12px;font-weight:600;color:#6b7280;margin-bottom:6px;">PREVIEW — John Doe / Acme Corp</div>
+    <div><strong>Subject:</strong> <span id="preview-subject" style="font-size:13px;"></span></div>
+    <div style="white-space:pre-wrap;font-size:13px;margin-top:8px;border-top:1px solid #e5e7eb;padding-top:8px;" id="preview-body"></div>
+  </div>
+</div>
+
+<!-- ── Schedule Tab ───────────────────────────────────────── -->
+<div class="tab-panel {% if tab == 'schedule' %}active{% endif %}" id="tab-schedule">
+  <div class="card" style="max-width:600px;">
+    <div class="card-title"><i class="fa-solid fa-clock"></i> Send Schedule <span class="muted" style="font-weight:400;">(leave blank to use global settings)</span></div>
+    <form method="post">
+      <input type="hidden" name="action" value="save_schedule">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Start Time</label>
+          <input type="time" name="schedule_start" class="form-control" value="{{ campaign.campaign_schedule_start }}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">End Time</label>
+          <input type="time" name="schedule_end" class="form-control" value="{{ campaign.campaign_schedule_end }}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Timezone</label>
+          <select name="timezone" class="form-control">
+            <option value="">— Global —</option>
+            {% for tz in timezones %}
+            <option value="{{ tz }}" {% if campaign.campaign_timezone == tz %}selected{% endif %}>{{ tz }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Active Days</label>
+        <div class="checkbox-group">
+          {% for day in weekdays %}
+          <label class="checkbox-label">
+            <input type="checkbox" name="active_days" value="{{ day }}" {% if day in active_days %}checked{% endif %}>
+            {{ day }}
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm">
+        <i class="fa-solid fa-floppy-disk"></i> Save Schedule
+      </button>
+    </form>
+  </div>
+</div>
+
+<!-- ── Options Tab ────────────────────────────────────────── -->
+<div class="tab-panel {% if tab == 'options' %}active{% endif %}" id="tab-options">
+  <div class="card" style="max-width:480px;">
+    <div class="card-title"><i class="fa-solid fa-sliders"></i> Campaign Options</div>
+    <form method="post">
+      <input type="hidden" name="action" value="save_options">
+      <div class="form-group">
+        <label class="form-label">Daily Limit Per Account <span class="form-hint">0 = use global setting</span></label>
+        <input type="number" name="daily_limit" class="form-control" value="{{ campaign.campaign_daily_limit or 0 }}" min="0" max="500" style="max-width:120px;">
+      </div>
+      <div class="form-group">
+        <label class="checkbox-label" style="font-size:14px;">
+          <input type="checkbox" name="tracking_enabled" value="on" {% if campaign.tracking_enabled %}checked{% endif %} style="width:16px;height:16px;">
+          Enable open &amp; click tracking
+        </label>
+      </div>
+      <div class="form-group">
+        <label class="checkbox-label" style="font-size:14px;">
+          <input type="checkbox" name="stop_on_reply" value="on" {% if campaign.stop_on_reply %}checked{% endif %} style="width:16px;height:16px;">
+          Stop sequence when lead replies
+        </label>
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm">
+        <i class="fa-solid fa-floppy-disk"></i> Save Options
+      </button>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Tab switching ────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    if (b.getAttribute('onclick') === `switchTab('${name}')`) b.classList.add('active');
+  });
+  history.replaceState(null, '', '?tab=' + name);
+}
+
+// ── Sequence editor ──────────────────────────────────────────
+let steps = [];
+let selStep = -1;
+let selVariant = 0;
+
+const PLACEHOLDERS = ['{first_name}','{last_name}','{company}','{sender_name}','{video_link}','{pitch}'];
+
+function initSeq() {
+  try { steps = JSON.parse({{ steps_json|tojson|safe }}); } catch(e) { steps = []; }
+  if (!steps.length) {
+    steps = [
+      { id: 1, wait_days: 0, variants: [{ subject: '', body: '' }] },
+      { id: 2, wait_days: 3, variants: [{ subject: '', body: '' }] },
+      { id: 3, wait_days: 4, variants: [{ subject: '', body: '' }] },
+    ];
+  }
+  selStep = 0;
+  selVariant = 0;
+  render();
+}
+
+function render() {
+  renderStepList();
+  renderEditor();
+}
+
+function renderStepList() {
+  const el = document.getElementById('step-list');
+  el.innerHTML = '';
+  steps.forEach((step, idx) => {
+    const sub = step.variants[0]?.subject || '(no subject)';
+    const varCount = step.variants.length;
+    const div = document.createElement('div');
+    div.className = 'step-item' + (idx === selStep ? ' active' : '');
+    div.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+        <div>
+          <div class="step-item-title">Step ${idx + 1}</div>
+          <div class="step-item-sub">${escHtml(sub.slice(0, 32))}${sub.length > 32 ? '…' : ''}</div>
+        </div>
+        <button onclick="event.stopPropagation();removeStep(${idx})" style="background:none;border:none;cursor:pointer;color:#9ca3af;padding:0 2px;font-size:12px;" title="Delete step">✕</button>
+      </div>
+      <div class="step-item-meta">
+        ${idx === 0 ? '<span style="font-size:11px;color:#6b7280;">Immediately</span>' : `<span style="font-size:11px;color:#6b7280;">+${step.wait_days}d</span>`}
+        ${varCount > 1 ? `<span style="font-size:10px;background:#dbeafe;color:#1e40af;border-radius:4px;padding:1px 5px;">A/B ×${varCount}</span>` : ''}
+      </div>`;
+    div.addEventListener('click', () => { selStep = idx; selVariant = 0; render(); });
+    el.appendChild(div);
+  });
+}
+
+function renderEditor() {
+  const el = document.getElementById('seq-editor');
+  if (selStep < 0 || selStep >= steps.length) {
+    el.innerHTML = '<div class="empty-panel">Select a step from the left to edit.</div>';
+    return;
+  }
+  const step = steps[selStep];
+  const variant = step.variants[selVariant] || { subject: '', body: '' };
+
+  // Variant tabs HTML
+  let vtabs = step.variants.map((v, i) => `
+    <span class="variant-tab ${i === selVariant ? 'active' : ''}" onclick="selVariant=${i};saveCurrentVariant();render();">
+      ${String.fromCharCode(65 + i)}
+    </span>
+  `).join('');
+  if (step.variants.length > 1) {
+    vtabs += `<span class="variant-tab del-tab" onclick="removeVariant()" title="Remove this variant">✕</span>`;
+  }
+
+  // Placeholder buttons
+  const phButtons = PLACEHOLDERS.map(p =>
+    `<button type="button" onclick="insertPlaceholder(${JSON.stringify(p)})">{${p.slice(1,-1)}}</button>`
+  ).join('');
+
+  el.innerHTML = `
+    <div class="seq-right-header">
+      <div style="font-size:13px;font-weight:600;">Step ${selStep + 1}
+        <span style="font-size:12px;font-weight:400;color:#9ca3af;margin-left:4px;">
+          ${selStep === 0 ? 'Sent immediately' : `Sent ${step.wait_days} day(s) after previous`}
+        </span>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <span class="variant-tab active" onclick="addVariant()" style="cursor:pointer;background:#f0fdf4;color:#16a34a;border-color:#bbf7d0;font-size:11px;">
+          <i class="fa-solid fa-plus"></i> Add Variant
+        </span>
+      </div>
+    </div>
+    <div class="seq-right-body">
+      ${selStep > 0 ? `
+      <div class="wait-row">
+        <i class="fa-solid fa-clock" style="color:#9ca3af;"></i>
+        Wait <input type="number" id="wait-days-input" value="${step.wait_days}" min="0" max="30" onchange="steps[${selStep}].wait_days=parseInt(this.value)||0;renderStepList();">
+        day(s) after previous step, then send:
+      </div>` : '<div style="margin-bottom:12px;font-size:12px;color:#6b7280;background:#f9fafb;border-radius:6px;padding:8px 12px;">⚡ This step sends immediately when a lead enters the sequence.</div>'}
+
+      <div class="variant-tabs" id="variant-tabs-row">${vtabs}</div>
+
+      <div class="form-group">
+        <label class="form-label">Subject</label>
+        <input type="text" id="step-subject" class="form-control" value="${escHtml(variant.subject)}" placeholder="Hey {first_name}, quick question about {company}" oninput="steps[selStep].variants[selVariant].subject=this.value;">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" style="display:flex;align-items:center;justify-content:space-between;">
+          <span>Body</span>
+          <span style="font-size:11px;color:#9ca3af;">Spintax: {Hi|Hello|Hey} {first_name}</span>
+        </label>
+        <div class="seq-toolbar">
+          <button type="button" onclick="wrapSel('**','**')" title="Bold"><b>B</b></button>
+          <button type="button" onclick="wrapSel('_','_')" title="Italic"><i>I</i></button>
+          <button type="button" onclick="insertLink()" title="Link">🔗</button>
+          <button type="button" onclick="insertBreak()" title="Line break">↵</button>
+          <select style="padding:3px 6px;border:1px solid #e5e7eb;border-radius:4px;font-size:11px;cursor:pointer;" onchange="insertPlaceholder(this.value);this.value=''">
+            <option value="">+ placeholder</option>
+            ${PLACEHOLDERS.map(p => `<option value="${p}">${p}</option>`).join('')}
+          </select>
+        </div>
+        <textarea id="step-body" class="seq-textarea" oninput="steps[selStep].variants[selVariant].body=this.value;">${escHtml(variant.body)}</textarea>
+      </div>
+    </div>`;
+}
+
+function saveCurrentVariant() {
+  const subj = document.getElementById('step-subject');
+  const body = document.getElementById('step-body');
+  if (subj && steps[selStep]) steps[selStep].variants[selVariant].subject = subj.value;
+  if (body && steps[selStep]) steps[selStep].variants[selVariant].body = body.value;
+}
+
+function addStep() {
+  saveCurrentVariant();
+  const maxId = steps.reduce((m, s) => Math.max(m, s.id), 0);
+  steps.push({ id: maxId + 1, wait_days: 3, variants: [{ subject: '', body: '' }] });
+  selStep = steps.length - 1;
+  selVariant = 0;
+  render();
+}
+
+function removeStep(idx) {
+  if (steps.length <= 1) { showToast('Need at least one step.', 'error'); return; }
+  if (!confirm(`Delete Step ${idx + 1}?`)) return;
+  saveCurrentVariant();
+  steps.splice(idx, 1);
+  selStep = Math.min(selStep, steps.length - 1);
+  selVariant = 0;
+  render();
+}
+
+function addVariant() {
+  saveCurrentVariant();
+  steps[selStep].variants.push({ subject: '', body: '' });
+  selVariant = steps[selStep].variants.length - 1;
+  render();
+}
+
+function removeVariant() {
+  if (steps[selStep].variants.length <= 1) return;
+  steps[selStep].variants.splice(selVariant, 1);
+  selVariant = Math.max(0, selVariant - 1);
+  render();
+}
+
+function wrapSel(before, after) {
+  const ta = document.getElementById('step-body');
+  if (!ta) return;
+  const start = ta.selectionStart, end = ta.selectionEnd;
+  const sel = ta.value.slice(start, end) || 'text';
+  ta.value = ta.value.slice(0, start) + before + sel + after + ta.value.slice(end);
+  ta.setSelectionRange(start + before.length, start + before.length + sel.length);
+  ta.focus();
+  steps[selStep].variants[selVariant].body = ta.value;
+}
+
+function insertBreak() {
+  const ta = document.getElementById('step-body');
+  if (!ta) return;
+  const pos = ta.selectionStart;
+  ta.value = ta.value.slice(0, pos) + '\n' + ta.value.slice(pos);
+  ta.setSelectionRange(pos + 1, pos + 1);
+  ta.focus();
+  steps[selStep].variants[selVariant].body = ta.value;
+}
+
+function insertLink() {
+  const url = prompt('Enter URL:');
+  if (!url) return;
+  const ta = document.getElementById('step-body');
+  if (!ta) return;
+  const pos = ta.selectionStart;
+  ta.value = ta.value.slice(0, pos) + url + ta.value.slice(pos);
+  ta.setSelectionRange(pos, pos + url.length);
+  ta.focus();
+  steps[selStep].variants[selVariant].body = ta.value;
+}
+
+function insertPlaceholder(ph) {
+  if (!ph) return;
+  const ta = document.getElementById('step-body');
+  if (!ta) return;
+  const pos = ta.selectionStart;
+  ta.value = ta.value.slice(0, pos) + ph + ta.value.slice(pos);
+  ta.setSelectionRange(pos + ph.length, pos + ph.length);
+  ta.focus();
+  steps[selStep].variants[selVariant].body = ta.value;
+}
+
+async function doPreview() {
+  saveCurrentVariant();
+  if (selStep < 0) return;
+  const v = steps[selStep].variants[selVariant] || {};
+  const btn = document.getElementById('preview-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Preview';
+  try {
+    const res = await fetch('{{ url_for("campaign_preview_step", campaign_id=campaign.id) }}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subject: v.subject || '', body: v.body || '', step: selStep + 1 }),
+    });
+    const data = await res.json();
+    document.getElementById('preview-subject').textContent = data.subject || '';
+    document.getElementById('preview-body').innerHTML = data.body || '';
+    document.getElementById('preview-result').classList.remove('hidden');
+  } catch(e) {
+    showToast('Preview failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa-solid fa-eye"></i> Preview';
+  }
+}
+
+function saveSequence() {
+  saveCurrentVariant();
+  document.getElementById('seq-json-input').value = JSON.stringify(steps);
+  document.getElementById('seq-form').submit();
+}
+
+function escHtml(str) {
+  return (str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Chart ────────────────────────────────────────────────────
+{% if analytics.total_sent > 0 %}
+document.addEventListener('DOMContentLoaded', function() {
+  const el = document.getElementById('campaignChart');
+  if (!el) return;
+  new Chart(el.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: {{ analytics.chart_labels|safe }},
+      datasets: [
+        { label: 'Sent', data: {{ analytics.chart_sent|safe }}, borderColor:'#2563eb', backgroundColor:'rgba(37,99,235,0.08)', tension:0.3, fill:true, pointRadius:3 },
+        { label: 'Opened', data: {{ analytics.chart_opened|safe }}, borderColor:'#d97706', backgroundColor:'transparent', tension:0.3, fill:false, pointRadius:3 },
+      ]
+    },
+    options: {
+      responsive:true,
+      plugins:{ legend:{ position:'bottom', labels:{ font:{size:12}, padding:16 } } },
+      scales:{
+        x:{ grid:{color:'#f3f4f6'}, ticks:{font:{size:11}} },
+        y:{ grid:{color:'#f3f4f6'}, ticks:{font:{size:11},stepSize:1}, beginAtZero:true },
+      }
+    }
+  });
+});
+{% endif %}
+
+// Init on page load
+document.addEventListener('DOMContentLoaded', function() {
+  initSeq();
+  // Close modals on backdrop click
+  document.querySelectorAll('.modal-backdrop').forEach(m => {
+    m.addEventListener('click', e => { if (e.target === m) m.classList.add('hidden'); });
+  });
+});
+</script>
+{% endblock %}

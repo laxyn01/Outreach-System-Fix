@@ -28,7 +28,11 @@
     <tbody>
       {% for c in campaigns %}
       <tr>
-        <td class="font-semibold">{{ c.name }}</td>
+        <td>
+          <a href="{{ url_for('campaign_edit', campaign_id=c.id) }}" class="font-semibold" style="color:#111827;text-decoration:none;">
+            {{ c.name }}
+          </a>
+        </td>
         <td><span class="badge badge-{{ c.status_color() }}">{{ c.status }}</span></td>
         <td>
           <div class="progress-bar" style="min-width:80px;">
@@ -43,6 +47,10 @@
         <td class="muted">{{ c.created_at.strftime('%b %d') if c.created_at else '—' }}</td>
         <td>
           <div class="row-actions">
+            <!-- FIX 3: Edit button -->
+            <a href="{{ url_for('campaign_edit', campaign_id=c.id, tab='sequences') }}" class="btn btn-xs btn-secondary" title="Edit">
+              <i class="fa-solid fa-pen"></i> Edit
+            </a>
             {% if c.status == 'active' %}
             <form method="post" action="{{ url_for('campaign_pause', campaign_id=c.id) }}" style="display:inline;">
               <button type="submit" class="btn btn-xs btn-secondary">Pause</button>
@@ -52,7 +60,8 @@
               <button type="submit" class="btn btn-xs btn-primary">Launch</button>
             </form>
             {% endif %}
-            <form method="post" action="{{ url_for('campaign_delete', campaign_id=c.id) }}" style="display:inline;" onsubmit="return confirm('Delete campaign? This will not delete leads.')">
+            <form method="post" action="{{ url_for('campaign_delete', campaign_id=c.id) }}" style="display:inline;"
+                  onsubmit="return confirm('Delete campaign? This will not delete leads.')">
               <button type="submit" class="btn btn-xs btn-danger">
                 <i class="fa-solid fa-trash"></i>
               </button>
