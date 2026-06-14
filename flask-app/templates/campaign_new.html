@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block title %}New Campaign — OutreachCommand{% endblock %}
+{% block page_title %}New Campaign{% endblock %}
+{% block topbar_actions %}
+  <a href="{{ url_for('campaigns_page') }}" class="btn btn-secondary btn-sm">
+    <i class="fa-solid fa-arrow-left"></i> Back
+  </a>
+{% endblock %}
+
+{% block content %}
+<!-- Wizard steps indicator -->
+<div class="wizard-steps" id="wizard-nav">
+  <div class="wizard-step active" data-step="1" onclick="goStep(1)">
+    <i class="fa-solid fa-tag"></i> 1. Name
+  </div>
+  <div class="wizard-step" data-step="2" onclick="goStep(2)">
+    <i class="fa-solid fa-users"></i> 2. Leads
+  </div>
+  <div class="wizard-step" data-step="3" onclick="goStep(3)">
+    <i class="fa-solid fa-file-lines"></i> 3. Templates
+  </div>
+  <div class="wizard-step" data-step="4" onclick="goStep(4)">
+    <i class="fa-solid fa-rocket"></i> 4. Launch
+  </div>
+</div>
+
+<form method="post" enctype="multipart/form-data" id="campaign-form">
+  <!-- Step 1: Name -->
+  <div class="wizard-panel active" id="step-1">
+    <div class="card">
+      <div class="card-title">Campaign Name</div>
+      <div class="form-group">
+        <label class="form-label">Name <span class="form-hint">e.g. "Q1 SaaS Outreach"</span></label>
+        <input type="text" name="name" class="form-control" required placeholder="My Campaign" id="camp-name">
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button type="button" class="btn btn-primary" onclick="goStep(2)">Next: Add Leads <i class="fa-solid fa-arrow-right"></i></button>
+    </div>
+  </div>
+
+  <!-- Step 2: Leads -->
+  <div class="wizard-panel" id="step-2">
+    <div class="card">
+      <div class="card-title">Upload Leads CSV</div>
+      <p class="muted" style="margin-bottom:16px;">
+        Columns: <code>first_name</code>, <code>last_name</code>, <code>email</code>, <code>company</code><br>
+        Also supports: <code>name</code>, <code>full_name</code> (auto-split into first/last)
+      </p>
+      <div class="form-group">
+        <label class="form-label">CSV or Excel File <span class="form-hint">(optional — you can add leads later)</span></label>
+        <input type="file" name="file" accept=".csv,.xlsx,.xls" class="form-control">
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button type="button" class="btn btn-secondary" onclick="goStep(1)"><i class="fa-solid fa-arrow-left"></i> Back</button>
+      <button type="button" class="btn btn-primary" onclick="goStep(3)">Next: Templates <i class="fa-solid fa-arrow-right"></i></button>
+    </div>
+  </div>
+
+  <!-- Step 3: Templates -->
+  <div class="wizard-panel" id="step-3">
+    <div class="card">
+      <div class="card-title">Email Sequence Templates</div>
+      <p class="muted" style="margin-bottom:16px;">Assign templates for each step. Leave blank to use system defaults.</p>
+
+      <div class="form-group">
+        <label class="form-label">Step 1 — Initial Outreach</label>
+        <select name="template_step1" class="form-control">
+          <option value="">— Default template —</option>
+          {% for t in step1_templates %}
+          <option value="{{ t.id }}">{{ t.name }} · {{ t.subject[:50] }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Step 2 — Follow Up (sent 3 days later)</label>
+        <select name="template_step2" class="form-control">
+          <option value="">— Default template —</option>
+          {% for t in step2_templates %}
+          <option value="{{ t.id }}">{{ t.name }} · {{ t.subject[:50] }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Step 3 — Close Loop (sent 4 days after step 2)</label>
+        <select name="template_step3" class="form-control">
+          <option value="">— Default template —</option>
+          {% for t in step3_templates %}
+          <option value="{{ t.id }}">{{ t.name }} · {{ t.subject[:50] }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      {% if not step1_templates and not step2_templates and not step3_templates %}
+      <div style="padding:12px;background:#eff6ff;border-radius:6px;font-size:13px;color:#1e40af;">
+        <i class="fa-solid fa-info-circle"></i>
+        No custom templates yet — <a href="{{ url_for('templates_page') }}">create some</a> or defaults will be used.
+      </div>
+      {% endif %}
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button type="button" class="btn btn-secondary" onclick="goStep(2)"><i class="fa-solid fa-arrow-left"></i> Back</button>
+      <button type="button" class="btn btn-primary" onclick="goStep(4)">Next: Launch <i class="fa-solid fa-arrow-right"></i></button>
+    </div>
+  </div>
+
+  <!-- Step 4: Launch -->
+  <div class="wizard-panel" id="step-4">
+    <div class="card">
+      <div class="card-title">Review &amp; Launch</div>
+      <p style="font-size:14px;color:#374151;margin-bottom:20px;">
+        Campaign <strong id="review-name">—</strong> is ready. The scheduler will start sending emails
+        within the active send window using your configured accounts.
+      </p>
+      <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin-bottom:16px;">
+        <div style="font-size:13px;color:#6b7280;line-height:2;">
+          <div>📧 Step 1 sent immediately when lead is picked</div>
+          <div>📧 Step 2 sent 3 days after Step 1</div>
+          <div>📧 Step 3 sent 4 days after Step 2</div>
+          <div>⏱ 60–120 second interval between each send</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:12px;">
+        <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;">
+          <input type="checkbox" name="launch" value="1" id="launch-now" checked style="width:16px;height:16px;">
+          Launch immediately (set status to Active)
+        </label>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button type="button" class="btn btn-secondary" onclick="goStep(3)"><i class="fa-solid fa-arrow-left"></i> Back</button>
+      <button type="submit" class="btn btn-primary">
+        <i class="fa-solid fa-rocket"></i> Create Campaign
+      </button>
+    </div>
+  </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentStep = 1;
+
+function goStep(n) {
+  // Validate step 1 before proceeding
+  if (n > 1 && !document.getElementById('camp-name').value.trim()) {
+    document.getElementById('camp-name').focus();
+    showToast('Please enter a campaign name first.', 'error');
+    return;
+  }
+  currentStep = n;
+  document.querySelectorAll('.wizard-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.wizard-step').forEach(s => {
+    const sn = parseInt(s.dataset.step);
+    s.classList.remove('active', 'done');
+    if (sn === n) s.classList.add('active');
+    else if (sn < n) s.classList.add('done');
+  });
+  document.getElementById('step-' + n).classList.add('active');
+  // Update review name
+  document.getElementById('review-name').textContent = document.getElementById('camp-name').value || '—';
+}
+</script>
+{% endblock %}

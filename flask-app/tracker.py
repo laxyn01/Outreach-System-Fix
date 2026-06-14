@@ -5,13 +5,14 @@ import urllib.parse
 def replace_placeholders(text: str, lead, sender_name: str, video_link: str = '') -> str:
     if not text:
         return text
-    first = (lead.first_name or 'there').strip() or 'there'
-    last = (lead.last_name or '').strip()
-    company = (lead.company or 'your company').strip() or 'your company'
+    first = (getattr(lead, 'first_name', None) or 'there').strip() or 'there'
+    last = (getattr(lead, 'last_name', None) or '').strip()
+    company = (getattr(lead, 'company', None) or '').strip()
+    # Bug fix #2: all placeholders including [Name] and [name]
     replacements = {
         '{first_name}': first,
         '{last_name}': last,
-        '{company}': company,
+        '{company}': company or 'your company',
         '{sender_name}': sender_name or 'Your Name',
         '[Name]': first,
         '[name]': first,
@@ -39,23 +40,29 @@ def wrap_links(html: str, lead_id: int, step: int, base_url: str) -> str:
 
 
 def inject_tracking_pixel(html: str, lead_id: int, step: int, base_url: str) -> str:
+    """Bug fix #7: inject pixel at VERY TOP of body before any text."""
     base_url = base_url.rstrip('/')
     pixel = (
         f'<img src="{base_url}/track/open/{lead_id}/{step}" '
-        f'width="1" height="1" style="display:none" alt="">'
+        f'width="1" height="1" '
+        f'style="position:absolute;top:0;left:0;opacity:0;pointer-events:none;" '
+        f'alt="" border="0">'
     )
-    if '</body>' in html.lower():
-        return re.sub(r'</body>', pixel + '</body>', html, count=1, flags=re.IGNORECASE)
-    return html + pixel
+    # Insert right after <body...> tag
+    body_match = re.search(r'<body[^>]*>', html, re.IGNORECASE)
+    if body_match:
+        insert_pos = body_match.end()
+        return html[:insert_pos] + pixel + html[insert_pos:]
+    return pixel + html
 
 
 def append_unsubscribe(body_text: str, body_html: str, lead_id: int, base_url: str):
     base_url = base_url.rstrip('/')
     unsub_url = f'{base_url}/unsubscribe/{lead_id}'
-    text_footer = f'\n\nTo unsubscribe reply STOP or click: {unsub_url}'
+    text_footer = f'\n\nTo unsubscribe: {unsub_url}'
     html_footer = (
-        f'<p style="font-size:12px;color:#888;margin-top:2em;">'
-        f'<a href="{unsub_url}" style="color:#888;">Unsubscribe</a></p>'
+        f'<br><p style="font-size:11px;color:#999;margin-top:24px;font-family:sans-serif;">'
+        f'<a href="{unsub_url}" style="color:#999;text-decoration:underline;">Unsubscribe</a></p>'
     )
     body_text = (body_text or '') + text_footer
     body_html = (body_html or '') + html_footer
@@ -65,8 +72,16 @@ def append_unsubscribe(body_text: str, body_html: str, lead_id: int, base_url: s
 def ensure_html_wrapper(body: str, is_html: bool) -> tuple:
     if is_html:
         if '<html' not in body.lower():
-            body = f'<html><body>{body}</body></html>'
+            # Bug fix #3: preserve newlines by converting to <br>, don't strip
+            body_html = body.replace('\n', '<br>\n')
+            body = f'<html><body style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#333;">{body_html}</body></html>'
         return '', body
+    # Plain text: keep as-is, also create HTML version preserving whitespace
     plain = body
-    html = f'<html><body><pre style="font-family:sans-serif;white-space:pre-wrap;">{body}</pre></body></html>'
+    body_escaped = body.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+    html = (
+        f'<html><body style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#333;">'
+        f'<div style="white-space:pre-wrap;">{body_escaped}</div>'
+        f'</body></html>'
+    )
     return plain, html

@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Campaigns — OutreachCommand{% endblock %}
+{% block page_title %}Campaigns{% endblock %}
+{% block topbar_actions %}
+  <a href="{{ url_for('campaign_new') }}" class="btn btn-primary btn-sm">
+    <i class="fa-solid fa-plus"></i> New Campaign
+  </a>
+{% endblock %}
+
+{% block content %}
+{% if campaigns %}
+<div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Status</th>
+        <th>Progress</th>
+        <th>Leads</th>
+        <th>Sent</th>
+        <th>Opens</th>
+        <th>Clicks</th>
+        <th>Replies</th>
+        <th>Created</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in campaigns %}
+      <tr>
+        <td class="font-semibold">{{ c.name }}</td>
+        <td><span class="badge badge-{{ c.status_color() }}">{{ c.status }}</span></td>
+        <td>
+          <div class="progress-bar" style="min-width:80px;">
+            <div class="progress-fill" style="width:{{ [((c.sent_count / c.leads_count * 100) if c.leads_count else 0)|int, 100]|min }}%"></div>
+          </div>
+        </td>
+        <td>{{ c.leads_count }}</td>
+        <td>{{ c.sent_count }}</td>
+        <td>{{ c.open_rate }}%</td>
+        <td>{{ c.click_rate }}%</td>
+        <td>{{ c.reply_rate }}%</td>
+        <td class="muted">{{ c.created_at.strftime('%b %d') if c.created_at else '—' }}</td>
+        <td>
+          <div class="row-actions">
+            {% if c.status == 'active' %}
+            <form method="post" action="{{ url_for('campaign_pause', campaign_id=c.id) }}" style="display:inline;">
+              <button type="submit" class="btn btn-xs btn-secondary">Pause</button>
+            </form>
+            {% elif c.status in ['paused', 'draft'] %}
+            <form method="post" action="{{ url_for('campaign_resume', campaign_id=c.id) }}" style="display:inline;">
+              <button type="submit" class="btn btn-xs btn-primary">Launch</button>
+            </form>
+            {% endif %}
+            <form method="post" action="{{ url_for('campaign_delete', campaign_id=c.id) }}" style="display:inline;" onsubmit="return confirm('Delete campaign? This will not delete leads.')">
+              <button type="submit" class="btn btn-xs btn-danger">
+                <i class="fa-solid fa-trash"></i>
+              </button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty-state">
+  <div class="empty-icon">🚀</div>
+  <p>No campaigns yet. Create your first campaign to start sending.</p>
+  <a href="{{ url_for('campaign_new') }}" class="btn btn-primary">
+    <i class="fa-solid fa-plus"></i> New Campaign
+  </a>
+</div>
+{% endif %}
+{% endblock %}

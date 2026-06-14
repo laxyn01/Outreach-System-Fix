@@ -1,70 +1,93 @@
 {% extends "base.html" %}
 {% block title %}Templates — OutreachCommand{% endblock %}
-{% block content %}
-<h1>Email Templates</h1>
+{% block page_title %}Email Templates{% endblock %}
 
-<div class="card">
-  <h2>Create Template</h2>
+{% block content %}
+<div class="card" style="max-width:720px;">
+  <div class="card-title"><i class="fa-solid fa-plus"></i> Create Template</div>
   <form method="post">
     <div class="form-row">
       <div class="form-group">
-        <label>Name</label>
-        <input type="text" name="name" required>
+        <label class="form-label">Name</label>
+        <input type="text" name="name" class="form-control" required placeholder="Step 1 — SaaS cold outreach">
       </div>
       <div class="form-group">
-        <label>Step</label>
-        <select name="step">
-          <option value="1">Step 1 — Initial Outreach</option>
+        <label class="form-label">Step</label>
+        <select name="step" class="form-control">
+          <option value="1">Step 1 — Initial</option>
           <option value="2">Step 2 — Follow Up</option>
           <option value="3">Step 3 — Close Loop</option>
         </select>
       </div>
     </div>
     <div class="form-group">
-      <label>Subject</label>
-      <input type="text" name="subject" required placeholder="Use {first_name}, {company}, spintax {Hi|Hello|Hey}">
+      <label class="form-label">Subject <span class="form-hint">Spintax: {Hi|Hello|Hey} {first_name}</span></label>
+      <input type="text" name="subject" class="form-control" required placeholder="{Quick question|Hey} about {company}">
     </div>
     <div class="form-group">
-      <label>Body</label>
-      <textarea name="body" rows="8" required placeholder="Use {first_name}, {last_name}, {company}, {sender_name}, {video_link}, {pitch}, [Name]"></textarea>
+      <label class="form-label">Body <span class="form-hint">Placeholders: {first_name} {last_name} {company} {sender_name} {video_link} {pitch} [Name]</span></label>
+      <textarea name="body" class="form-control" rows="8" required placeholder="Hi {first_name},&#10;&#10;I came across {company}..."></textarea>
     </div>
     <div class="form-group">
-      <label><input type="checkbox" name="is_html"> HTML email</label>
+      <label class="checkbox-label">
+        <input type="checkbox" name="is_html"> HTML email
+      </label>
     </div>
-    <button type="submit" class="btn btn-primary">Create Template</button>
+    <button type="submit" class="btn btn-primary btn-sm">
+      <i class="fa-solid fa-plus"></i> Create Template
+    </button>
   </form>
 </div>
 
-<table class="data-table">
-  <thead>
-    <tr><th>Name</th><th>Step</th><th>Subject</th><th>HTML</th><th>Actions</th></tr>
-  </thead>
-  <tbody>
-    {% for t in templates %}
-    <tr>
-      <td>{{ t.name }}</td>
-      <td>{{ t.step }}</td>
-      <td>{{ t.subject[:60] }}{% if t.subject|length > 60 %}...{% endif %}</td>
-      <td>{{ 'Yes' if t.is_html else 'No' }}</td>
-      <td>
-        <button type="button" class="btn btn-sm btn-secondary preview-btn" data-id="{{ t.id }}">Preview</button>
-        <form method="post" action="{{ url_for('template_delete', template_id=t.id) }}" style="display:inline;" onsubmit="return confirm('Delete template?');">
-          <button type="submit" class="btn btn-sm btn-danger">Delete</button>
-        </form>
-      </td>
-    </tr>
-    {% else %}
-    <tr><td colspan="5" class="empty">No templates. Default templates used at send time.</td></tr>
-    {% endfor %}
-  </tbody>
-</table>
+{% if templates %}
+<div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr><th>Name</th><th>Step</th><th>Subject</th><th>HTML</th><th>Actions</th></tr>
+    </thead>
+    <tbody>
+      {% for t in templates %}
+      <tr>
+        <td class="font-medium">{{ t.name }}</td>
+        <td><span class="badge badge-{% if t.step==1 %}blue{% elif t.step==2 %}yellow{% else %}gray{% endif %}">Step {{ t.step }}</span></td>
+        <td class="text-gray">{{ t.subject[:60] }}{% if t.subject|length > 60 %}…{% endif %}</td>
+        <td>{% if t.is_html %}<span class="badge badge-green">HTML</span>{% else %}<span class="muted">Plain</span>{% endif %}</td>
+        <td>
+          <div class="row-actions">
+            <button type="button" class="btn btn-xs btn-secondary preview-btn" data-id="{{ t.id }}">
+              <i class="fa-solid fa-eye"></i> Preview
+            </button>
+            <form method="post" action="{{ url_for('template_delete', template_id=t.id) }}" style="display:inline;" onsubmit="return confirm('Delete template?')">
+              <button type="submit" class="btn btn-xs btn-danger">
+                <i class="fa-solid fa-trash"></i>
+              </button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty-state">
+  <div class="empty-icon">📝</div>
+  <p>No templates yet. Built-in defaults are used when no templates exist.</p>
+</div>
+{% endif %}
 
-<div id="preview-modal" class="modal hidden">
-  <div class="modal-content">
-    <h2>Template Preview <span class="muted" style="font-size:0.85rem;">(sample: John / Acme Corp)</span></h2>
-    <p><strong>Subject:</strong> <span id="preview-subject"></span></p>
+<!-- Preview modal -->
+<div class="modal-backdrop hidden" id="preview-modal">
+  <div class="modal-box" style="max-width:640px;">
+    <div class="modal-title">
+      <i class="fa-solid fa-eye"></i> Template Preview
+      <span class="muted" style="font-size:12px;font-weight:400;"> — sample: John Doe / Acme Corp</span>
+    </div>
+    <p><strong>Subject:</strong> <span id="preview-subject" style="font-size:14px;"></span></p>
     <div id="preview-body" class="preview-body"></div>
-    <button type="button" class="btn btn-secondary" id="close-preview">Close</button>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-secondary" onclick="document.getElementById('preview-modal').classList.add('hidden')">Close</button>
+    </div>
   </div>
 </div>
 {% endblock %}
@@ -74,31 +97,20 @@
 document.querySelectorAll('.preview-btn').forEach(btn => {
   btn.addEventListener('click', async () => {
     btn.disabled = true;
-    btn.textContent = 'Loading...';
     try {
       const res = await fetch('/templates/' + btn.dataset.id + '/preview');
       const data = await res.json();
       document.getElementById('preview-subject').textContent = data.subject || data.error || '';
       const bodyEl = document.getElementById('preview-body');
-      if (data.error) {
-        bodyEl.textContent = data.error;
-      } else if (data.is_html) {
-        bodyEl.innerHTML = data.body;
-      } else {
-        bodyEl.textContent = data.body;
-      }
+      if (data.error) { bodyEl.textContent = data.error; }
+      else if (data.is_html) { bodyEl.innerHTML = data.body; }
+      else { bodyEl.textContent = data.body; }
       document.getElementById('preview-modal').classList.remove('hidden');
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Preview';
-    }
+    } finally { btn.disabled = false; }
   });
 });
-document.getElementById('close-preview').addEventListener('click', () => {
-  document.getElementById('preview-modal').classList.add('hidden');
-});
-document.getElementById('preview-modal').addEventListener('click', function(e) {
-  if (e.target === this) this.classList.add('hidden');
+document.getElementById('preview-modal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) e.currentTarget.classList.add('hidden');
 });
 </script>
 {% endblock %}

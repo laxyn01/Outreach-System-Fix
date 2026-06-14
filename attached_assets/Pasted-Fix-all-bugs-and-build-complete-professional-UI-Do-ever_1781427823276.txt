@@ -1,0 +1,159 @@
+Fix all bugs and build complete professional UI. Do everything together.
+
+CRITICAL BUG FIXES:
+
+1. From header fix - use formataddr for profile photo:
+from email.utils import formataddr
+msg['From'] = formataddr((sender_name, account.email_address))
+
+2. Placeholder replacement - in email_sender.py before sending:
+run spintax parser first then replace on both subject and body:
+{first_name} with lead.first_name or 'there'
+{last_name} with lead.last_name or ''
+{company} with lead.company or ''
+{sender_name} with sender_name from settings
+{video_link} with video_link from settings
+[Name] and [name] with lead.first_name or 'there'
+
+3. Spacing - use MIMEText(body, 'plain', 'utf-8') do not strip newlines
+
+4. Avoid Promotions tab - set these headers:
+msg['X-Mailer'] = 'Microsoft Outlook 16.0'
+msg['X-Priority'] = '3'
+msg['Importance'] = 'Normal'
+
+5. Send one email at a time with random delay 60-120 seconds using next_allowed_send_at in Settings table
+
+6. CSV import name fix - when column is Name or Full Name split on first space into first_name and last_name save both to DB
+
+7. Tracking pixel at very top of HTML body before any text:
+html_body = f'<html><body><img src="{tracking_base_url}/track/open/{lead.id}/{step}" width="1" height="1" style="position:absolute;top:0;left:0;opacity:0;" />{body.replace(chr(10), "<br>")}<br><br><a href="{tracking_base_url}/unsubscribe/{lead.id}" style="color:#999;font-size:11px;">Unsubscribe</a></body></html>'
+
+8. /track/open/<lead_id>/<step> route:
+import base64
+from flask import Response
+gif_bytes = base64.b64decode("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7")
+response = Response(gif_bytes, mimetype='image/gif')
+response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+lead.opened = True
+lead.opened_at = datetime.utcnow()
+db.session.commit()
+return response
+
+CAMPAIGN SYSTEM:
+
+Add Campaign model: id, name, status(draft/active/paused/complete), created_at, leads_count, sent_count, open_rate, reply_rate
+
+Add /campaigns page with table: Name, Status badge, Progress bar, Sent, Opens, Clicks, Replies, Actions(pause/resume/delete)
+
+Add New Campaign flow 4 steps:
+Step 1 - enter campaign name
+Step 2 - upload CSV or select existing leads
+Step 3 - select email sequence templates for step1 step2 step3
+Step 4 - set schedule and launch
+
+Each campaign has own leads own sequence own stats
+
+ANALYTICS PAGE:
+
+Add /analytics page with:
+Stats cards: Total Sent, Open Rate%, Click Rate%, Reply Rate%
+Line chart using Chart.js showing sent/opens/clicks/replies over last 30 days grouped by date from EmailLogs
+Filter: Last 7 days, Last 30 days, All time
+
+COMPLETE UI REDESIGN - Match Instantly.ai style:
+
+Colors:
+sidebar background #0a0a0a
+sidebar text white
+sidebar icons gray
+active item white background dark text
+main content background #ffffff
+border color #e5e7eb
+
+Font: Inter from Google Fonts font-weight 600 for headings
+
+Sidebar: fixed left width 60px icons only with tooltips on hover
+Logo at top lightning bolt icon in blue circle
+Nav icons for Dashboard, Campaigns, Leads, Analytics, Email Accounts, Templates, Settings
+
+Top bar: page title left, action buttons right, white background with bottom border
+
+Stats cards: white background, 1px border #e5e7eb, border-radius 8px, padding 20px, metric name small gray text, number large bold black, colored dot indicator
+
+Tables: clean alternating hover #f9fafb, status badges rounded pill, action buttons on row hover only
+
+Buttons: primary #2563eb rounded-md, danger #dc2626, with hover states
+
+Empty states: centered illustration with helpful text and CTA button
+
+Toast notifications: bottom right auto dismiss 3 seconds
+
+Modals: centered overlay backdrop blur for confirmations
+
+Mobile responsive with hamburger menu
+
+All pages consistent header with page title and primary action button top right
+
+REPLY DETECTION:
+
+Add /check/replies route using imaplib:
+For each email account connect to imap.gmail.com port 993 SSL
+Search inbox for emails FROM any lead email address
+If reply found set lead.replied=True stop sequence for that lead
+Run daily via APScheduler at 10am
+Add Check Replies Now button on dashboard
+
+SCHEDULE SETTINGS:
+
+Add to Settings page:
+Send window Start Time default 09:00 and End Time default 18:00
+Timezone dropdown default Asia/Kolkata
+Active days checkboxes Mon Tue Wed Thu Fri Sat Sun default Mon-Fri
+APScheduler checks these before every send
+Show on dashboard: Sending paused - outside schedule OR Next send in X minutes
+
+TEST SMTP BUTTON:
+
+In Email Accounts page each row has Test button
+Sends test email to same address
+Shows success green or error red inline without page reload
+
+WARMUP:
+
+When warmup toggle ON for account:
+Send 2 emails day 1, increase by 2 every day, max 10 per day
+Send to warmup addresses set in Settings
+Random subjects: Quick question, Checking in, Hey, Following up
+Log with type=warmup in EmailLogs
+Do not use warmup accounts for campaign sends
+
+UNSUBSCRIBE:
+
+/unsubscribe/<lead_id> sets unsubscribed=True
+Returns clean HTML page: You have been unsubscribed successfully
+Add to footer of every email
+
+EMAIL LOGS PAGE:
+
+Table: Lead name, email, subject, step, sent_at, opened yes/no with time, clicked yes/no with time, account used
+Sort newest first
+Export to CSV button downloads all logs
+
+LEADS PAGE:
+
+Table: checkbox, Name, Email, Company, Step, Status badge, Last Sent, Account, Actions
+Newest first ORDER BY id DESC
+Select All checkbox plus per row checkbox
+Bulk Delete with confirmation modal
+Individual delete trash icon per row
+Pause Resume button per lead
+Live search by name email company
+Filter dropdown: All/Pending/Active/Complete/Unsubscribed/Replied/Paused
+Pagination 25 per page show Showing X-Y of Z leads
+
+PING ROUTE:
+
+Add /ping route returns OK for uptime monitoring
+
+Make sure entire app starts without errors on python app.py

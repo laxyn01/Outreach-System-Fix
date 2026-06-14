@@ -1,51 +1,55 @@
 {% extends "base.html" %}
 {% block title %}Settings — OutreachCommand{% endblock %}
-{% block content %}
-<h1>Settings</h1>
+{% block page_title %}Settings{% endblock %}
 
-<form method="post">
+{% block content %}
+<form method="post" style="max-width:720px;">
   <div class="card">
-    <h2>Sender & Content</h2>
-    <div class="form-group">
-      <label>Sender Name <span class="muted">(used as {sender_name})</span></label>
-      <input type="text" name="sender_name" value="{{ settings.sender_name }}">
+    <div class="card-title"><i class="fa-solid fa-user"></i> Sender & Content</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Sender Name <span class="form-hint">{sender_name}</span></label>
+        <input type="text" name="sender_name" class="form-control" value="{{ settings.sender_name }}" placeholder="John Smith">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Video / Link URL <span class="form-hint">{video_link}</span></label>
+        <input type="url" name="video_link_url" class="form-control" value="{{ settings.video_link_url }}" placeholder="https://loom.com/...">
+      </div>
     </div>
     <div class="form-group">
-      <label>Video / Link URL <span class="muted">(Step 2 — {video_link})</span></label>
-      <input type="url" name="video_link_url" value="{{ settings.video_link_url }}" placeholder="https://...">
+      <label class="form-label">Pitch Text <span class="form-hint">{pitch} — 1-2 sentence value prop</span></label>
+      <textarea name="pitch_text" class="form-control" rows="3" placeholder="We help SaaS companies reduce churn by 40%...">{{ settings.pitch_text }}</textarea>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Tracking Base URL <span class="form-hint">Your public domain for open/click tracking</span></label>
+        <input type="url" name="tracking_base_url" class="form-control" value="{{ settings.tracking_base_url }}" placeholder="https://yourdomain.com">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Daily Limit Per Account</label>
+        <input type="number" name="daily_limit_per_account" class="form-control" value="{{ settings.daily_limit_per_account }}" min="1" max="500">
+      </div>
     </div>
     <div class="form-group">
-      <label>Pitch Text <span class="muted">(used as {pitch})</span></label>
-      <textarea name="pitch_text" rows="3" placeholder="What you do in 1-2 sentences...">{{ settings.pitch_text }}</textarea>
-    </div>
-    <div class="form-group">
-      <label>Tracking Base URL <span class="muted">(your public domain for open/click tracking)</span></label>
-      <input type="url" name="tracking_base_url" value="{{ settings.tracking_base_url }}" placeholder="https://yourdomain.com">
-    </div>
-    <div class="form-group">
-      <label>Warmup Addresses <span class="muted">(comma separated, used when warmup is enabled)</span></label>
-      <input type="text" name="warmup_addresses" value="{{ settings.warmup_addresses }}" placeholder="friend@example.com, test@example.com">
-    </div>
-    <div class="form-group">
-      <label>Daily Limit Per Account</label>
-      <input type="number" name="daily_limit_per_account" value="{{ settings.daily_limit_per_account }}" min="1" max="500">
+      <label class="form-label">Warmup Addresses <span class="form-hint">Comma-separated — used when warmup is ON</span></label>
+      <input type="text" name="warmup_addresses" class="form-control" value="{{ settings.warmup_addresses }}" placeholder="friend@example.com, test@example.com">
     </div>
   </div>
 
   <div class="card">
-    <h2>Send Schedule</h2>
+    <div class="card-title"><i class="fa-solid fa-clock"></i> Send Schedule</div>
     <div class="form-row">
       <div class="form-group">
-        <label>Start Time</label>
-        <input type="time" name="send_window_start" value="{{ settings.send_window_start }}">
+        <label class="form-label">Start Time</label>
+        <input type="time" name="send_window_start" class="form-control" value="{{ settings.send_window_start }}">
       </div>
       <div class="form-group">
-        <label>End Time</label>
-        <input type="time" name="send_window_end" value="{{ settings.send_window_end }}">
+        <label class="form-label">End Time</label>
+        <input type="time" name="send_window_end" class="form-control" value="{{ settings.send_window_end }}">
       </div>
       <div class="form-group">
-        <label>Timezone</label>
-        <select name="timezone">
+        <label class="form-label">Timezone</label>
+        <select name="timezone" class="form-control">
           {% for tz in timezones %}
           <option value="{{ tz }}" {% if settings.timezone == tz %}selected{% endif %}>{{ tz }}</option>
           {% endfor %}
@@ -53,16 +57,21 @@
       </div>
     </div>
     <div class="form-group">
-      <label>Active Days</label>
-      <div class="checkbox-row">
+      <label class="form-label">Active Days</label>
+      <div class="checkbox-group">
         {% for day in weekdays %}
-        <label><input type="checkbox" name="active_days" value="{{ day }}" {% if day in active_days %}checked{% endif %}> {{ day }}</label>
+        <label class="checkbox-label">
+          <input type="checkbox" name="active_days" value="{{ day }}" {% if day in active_days %}checked{% endif %}>
+          {{ day }}
+        </label>
         {% endfor %}
       </div>
     </div>
-    <p class="muted">The scheduler runs every 60–120 seconds between sends, only during the active window above.</p>
+    <p class="muted">Scheduler sends one email every 60–120 seconds, only during the active window. Reply check runs daily at 10am.</p>
   </div>
 
-  <button type="submit" class="btn btn-primary">Save Settings</button>
+  <button type="submit" class="btn btn-primary">
+    <i class="fa-solid fa-floppy-disk"></i> Save Settings
+  </button>
 </form>
 {% endblock %}

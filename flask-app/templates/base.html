@@ -5,32 +5,105 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}OutreachCommand{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  {% block head %}{% endblock %}
 </head>
 <body>
-  <div class="layout">
-    <aside class="sidebar">
-      <div class="logo">OutreachCommand</div>
-      <nav>
-        <a href="{{ url_for('dashboard') }}" class="{% if request.endpoint == 'dashboard' %}active{% endif %}">Dashboard</a>
-        <a href="{{ url_for('leads_page') }}" class="{% if request.endpoint == 'leads_page' %}active{% endif %}">Leads</a>
-        <a href="{{ url_for('upload') }}" class="{% if request.endpoint == 'upload' %}active{% endif %}">Upload Leads</a>
-        <a href="{{ url_for('accounts') }}" class="{% if request.endpoint == 'accounts' %}active{% endif %}">Email Accounts</a>
-        <a href="{{ url_for('templates_page') }}" class="{% if request.endpoint == 'templates_page' %}active{% endif %}">Templates</a>
-        <a href="{{ url_for('logs_page') }}" class="{% if request.endpoint == 'logs_page' %}active{% endif %}">Email Logs</a>
-        <a href="{{ url_for('settings_page') }}" class="{% if request.endpoint == 'settings_page' %}active{% endif %}">Settings</a>
-      </nav>
-    </aside>
-    <main class="content">
-      {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
+<div class="layout">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <a href="{{ url_for('dashboard') }}" class="sidebar-logo">⚡</a>
+    <nav>
+      <a href="{{ url_for('dashboard') }}"
+         class="{% if request.endpoint == 'dashboard' %}active{% endif %}"
+         data-tooltip="Dashboard">
+        <i class="fa-solid fa-house"></i>
+      </a>
+      <a href="{{ url_for('campaigns_page') }}"
+         class="{% if 'campaign' in request.endpoint %}active{% endif %}"
+         data-tooltip="Campaigns">
+        <i class="fa-solid fa-rocket"></i>
+      </a>
+      <a href="{{ url_for('leads_page') }}"
+         class="{% if request.endpoint == 'leads_page' %}active{% endif %}"
+         data-tooltip="Leads">
+        <i class="fa-solid fa-users"></i>
+      </a>
+      <a href="{{ url_for('analytics_page') }}"
+         class="{% if request.endpoint == 'analytics_page' %}active{% endif %}"
+         data-tooltip="Analytics">
+        <i class="fa-solid fa-chart-line"></i>
+      </a>
+      <a href="{{ url_for('upload') }}"
+         class="{% if request.endpoint == 'upload' %}active{% endif %}"
+         data-tooltip="Upload Leads">
+        <i class="fa-solid fa-upload"></i>
+      </a>
+      <a href="{{ url_for('accounts') }}"
+         class="{% if request.endpoint == 'accounts' %}active{% endif %}"
+         data-tooltip="Email Accounts">
+        <i class="fa-solid fa-envelope"></i>
+      </a>
+      <a href="{{ url_for('templates_page') }}"
+         class="{% if request.endpoint == 'templates_page' %}active{% endif %}"
+         data-tooltip="Templates">
+        <i class="fa-solid fa-file-lines"></i>
+      </a>
+      <a href="{{ url_for('logs_page') }}"
+         class="{% if request.endpoint == 'logs_page' %}active{% endif %}"
+         data-tooltip="Email Logs">
+        <i class="fa-solid fa-list"></i>
+      </a>
+      <a href="{{ url_for('settings_page') }}"
+         class="{% if request.endpoint == 'settings_page' %}active{% endif %}"
+         data-tooltip="Settings">
+        <i class="fa-solid fa-gear"></i>
+      </a>
+    </nav>
+  </aside>
+
+  <!-- Main content -->
+  <div class="main-wrap">
+    <!-- Top bar -->
+    <div class="topbar">
+      <span class="topbar-title">{% block page_title %}{% endblock %}</span>
+      <div class="topbar-actions">{% block topbar_actions %}{% endblock %}</div>
+    </div>
+
+    <!-- Flash messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="flash-container" style="padding-top:12px;">
           {% for category, message in messages %}
-            <div class="flash flash-{{ category }}">{{ message }}</div>
+            <div class="flash flash-{{ category }}">
+              <i class="fa-solid {% if category == 'success' %}fa-circle-check{% else %}fa-circle-exclamation{% endif %}"></i>
+              {{ message }}
+            </div>
           {% endfor %}
-        {% endif %}
-      {% endwith %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <!-- Page content -->
+    <div class="page-content">
       {% block content %}{% endblock %}
-    </main>
+    </div>
   </div>
-  {% block scripts %}{% endblock %}
+</div>
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<script>
+function showToast(msg, type = 'success') {
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.innerHTML = `<i class="fa-solid ${type === 'success' ? 'fa-check' : 'fa-xmark'}"></i> ${msg}`;
+  document.getElementById('toast-container').appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+}
+</script>
+{% block scripts %}{% endblock %}
 </body>
 </html>

@@ -1,70 +1,98 @@
 {% extends "base.html" %}
 {% block title %}Email Accounts — OutreachCommand{% endblock %}
-{% block content %}
-<h1>Email Accounts</h1>
+{% block page_title %}Email Accounts{% endblock %}
 
-<div class="card">
-  <h2>Add / Update Account</h2>
+{% block content %}
+<div class="card" style="max-width:700px;">
+  <div class="card-title"><i class="fa-solid fa-plus"></i> Add / Update Account</div>
   <form method="post">
     <div class="form-row">
       <div class="form-group">
-        <label>Email Address</label>
-        <input type="email" name="email_address" required>
+        <label class="form-label">Email Address</label>
+        <input type="email" name="email_address" class="form-control" required placeholder="you@gmail.com">
       </div>
       <div class="form-group">
-        <label>App Password (Gmail 16-digit)</label>
-        <input type="password" name="app_password" required>
+        <label class="form-label">App Password <span class="form-hint">Gmail 16-char</span></label>
+        <input type="password" name="app_password" class="form-control" required placeholder="xxxx xxxx xxxx xxxx">
       </div>
       <div class="form-group">
-        <label>SMTP Host</label>
-        <input type="text" name="smtp_host" value="smtp.gmail.com">
+        <label class="form-label">SMTP Host</label>
+        <input type="text" name="smtp_host" class="form-control" value="smtp.gmail.com">
       </div>
       <div class="form-group">
-        <label>SMTP Port</label>
-        <input type="number" name="smtp_port" value="587">
+        <label class="form-label">SMTP Port</label>
+        <input type="number" name="smtp_port" class="form-control" value="587">
       </div>
     </div>
-    <button type="submit" class="btn btn-primary">Save Account</button>
+    <button type="submit" class="btn btn-primary btn-sm">
+      <i class="fa-solid fa-floppy-disk"></i> Save Account
+    </button>
   </form>
 </div>
 
-<table class="data-table">
-  <thead>
-    <tr>
-      <th>Email</th>
-      <th>SMTP</th>
-      <th>Daily Sent / Limit</th>
-      <th>Warmup</th>
-      <th>Actions</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for acc in accounts %}
-    <tr>
-      <td>{{ acc.email_address }}</td>
-      <td>{{ acc.smtp_host }}:{{ acc.smtp_port }}</td>
-      <td>{{ acc.daily_sent_count }} / {{ settings.daily_limit_per_account }}</td>
-      <td>
-        <form method="post" action="{{ url_for('account_warmup', account_id=acc.id) }}">
-          <label style="font-weight:normal;">
-            <input type="checkbox" name="warmup_enabled" value="on" onchange="this.form.submit()" {% if acc.warmup_enabled %}checked{% endif %}>
-            On (day {{ acc.warmup_day }})
-          </label>
-        </form>
-      </td>
-      <td class="actions">
-        <button type="button" class="btn btn-sm btn-secondary test-btn" data-id="{{ acc.id }}">Test SMTP</button>
-        <span class="test-result" id="test-{{ acc.id }}"></span>
-        <form method="post" action="{{ url_for('account_delete', account_id=acc.id) }}" style="display:inline;" onsubmit="return confirm('Delete account?');">
-          <button type="submit" class="btn btn-sm btn-danger">Delete</button>
-        </form>
-      </td>
-    </tr>
-    {% else %}
-    <tr><td colspan="5" class="empty">No accounts yet. Add one above.</td></tr>
-    {% endfor %}
-  </tbody>
-</table>
+{% if accounts %}
+<div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Email</th><th>SMTP</th><th>Sent Today</th><th>Warmup</th><th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for acc in accounts %}
+      <tr>
+        <td class="font-medium">{{ acc.email_address }}</td>
+        <td class="text-gray text-sm">{{ acc.smtp_host }}:{{ acc.smtp_port }}</td>
+        <td>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span>{{ acc.daily_sent_count }} / {{ settings.daily_limit_per_account }}</span>
+            <div class="progress-bar" style="width:60px;">
+              <div class="progress-fill" style="width:{{ [(acc.daily_sent_count / settings.daily_limit_per_account * 100)|int, 100]|min }}%;"></div>
+            </div>
+          </div>
+        </td>
+        <td>
+          <form method="post" action="{{ url_for('account_warmup', account_id=acc.id) }}">
+            <label class="checkbox-label">
+              <input type="checkbox" name="warmup_enabled" value="on" onchange="this.form.submit()" {% if acc.warmup_enabled %}checked{% endif %}>
+              {% if acc.warmup_enabled %}Day {{ acc.warmup_day }}{% else %}Off{% endif %}
+            </label>
+          </form>
+        </td>
+        <td>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <button type="button" class="btn btn-secondary btn-xs test-btn" data-id="{{ acc.id }}">
+              <i class="fa-solid fa-paper-plane"></i> Test SMTP
+            </button>
+            <span class="test-result" id="test-{{ acc.id }}"></span>
+            <form method="post" action="{{ url_for('account_delete', account_id=acc.id) }}" style="display:inline;" onsubmit="return confirm('Delete account?')">
+              <button type="submit" class="btn btn-danger btn-xs">
+                <i class="fa-solid fa-trash"></i>
+              </button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty-state">
+  <div class="empty-icon">📧</div>
+  <p>No email accounts yet. Add a Gmail account with an App Password above.</p>
+</div>
+{% endif %}
+
+<div class="card" style="max-width:560px;margin-top:20px;">
+  <div class="card-title"><i class="fa-solid fa-info-circle"></i> Gmail Setup</div>
+  <ol style="font-size:13px;color:#374151;line-height:2;padding-left:20px;">
+    <li>Enable 2FA on your Google account</li>
+    <li>Go to Google Account → Security → App passwords</li>
+    <li>Create a new app password for "Mail"</li>
+    <li>Copy the 16-character password (no spaces) and paste above</li>
+  </ol>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -74,18 +102,20 @@ document.querySelectorAll('.test-btn').forEach(btn => {
     const id = btn.dataset.id;
     const el = document.getElementById('test-' + id);
     btn.disabled = true;
-    el.textContent = 'Testing...';
-    el.className = 'test-result';
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Testing...';
+    el.textContent = '';
     try {
       const res = await fetch('/accounts/' + id + '/test', { method: 'POST' });
       const data = await res.json();
-      el.textContent = data.message;
+      el.textContent = data.ok ? '✓ ' + data.message : '✗ ' + data.message;
       el.className = 'test-result ' + (data.ok ? 'success' : 'error');
+      showToast(data.message, data.ok ? 'success' : 'error');
     } catch (e) {
-      el.textContent = 'Error: ' + e.message;
+      el.textContent = '✗ ' + e.message;
       el.className = 'test-result error';
     } finally {
       btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Test SMTP';
     }
   });
 });

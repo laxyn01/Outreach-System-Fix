@@ -1,44 +1,59 @@
 {% extends "base.html" %}
 {% block title %}Upload Leads — OutreachCommand{% endblock %}
-{% block content %}
-<h1>Upload Leads</h1>
-<p class="muted">CSV columns: first_name, last_name, email, company. Also accepts .xlsx/.xls files.</p>
+{% block page_title %}Upload Leads{% endblock %}
 
+{% block content %}
 {% if not show_preview %}
-<div class="card">
+<div class="card" style="max-width:560px;">
+  <div class="card-title"><i class="fa-solid fa-upload"></i> Import from CSV or Excel</div>
+  <p class="muted" style="margin-bottom:16px;">
+    Supported columns: <code>email</code>, <code>first_name</code>, <code>last_name</code>, <code>company</code><br>
+    Also accepts: <code>name</code> or <code>full_name</code> (auto-split into first/last)
+  </p>
   <form method="post" enctype="multipart/form-data">
     <input type="hidden" name="action" value="preview">
     <div class="form-group">
-      <label>CSV or Excel File</label>
-      <input type="file" name="file" accept=".csv,.xlsx,.xls" required>
+      <label class="form-label">File</label>
+      <input type="file" name="file" accept=".csv,.xlsx,.xls" required class="form-control">
     </div>
-    <button type="submit" class="btn btn-primary">Preview Import</button>
+    <button type="submit" class="btn btn-primary">
+      <i class="fa-solid fa-eye"></i> Preview Import
+    </button>
   </form>
 </div>
 {% else %}
-<p>Preview <strong>{{ preview_rows|length }}</strong> leads{% if skipped %} ({{ skipped }} invalid/duplicate rows skipped){% endif %}</p>
-<div style="max-height:400px;overflow-y:auto;margin-bottom:1rem;">
-<table class="data-table">
-  <thead>
-    <tr><th>First Name</th><th>Last Name</th><th>Email</th><th>Company</th></tr>
-  </thead>
-  <tbody>
-    {% for row in preview_rows %}
-    <tr>
-      <td>{{ row.first_name or '—' }}</td>
-      <td>{{ row.last_name or '—' }}</td>
-      <td>{{ row.email }}</td>
-      <td>{{ row.company or '—' }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+<div class="section-header">
+  <span class="section-title">Preview — {{ preview_rows|length }} leads{% if skipped %} ({{ skipped }} skipped){% endif %}</span>
+  <a href="{{ url_for('upload') }}" class="btn btn-secondary btn-sm">
+    <i class="fa-solid fa-xmark"></i> Cancel
+  </a>
 </div>
+
+<div class="table-wrap" style="max-height:420px;overflow-y:auto;margin-bottom:16px;">
+  <table class="data-table">
+    <thead>
+      <tr><th>First Name</th><th>Last Name</th><th>Email</th><th>Company</th></tr>
+    </thead>
+    <tbody>
+      {% for row in preview_rows %}
+      <tr>
+        <td>{{ row.first_name or '—' }}</td>
+        <td>{{ row.last_name or '—' }}</td>
+        <td>{{ row.email }}</td>
+        <td>{{ row.company or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
 <form method="post">
   <input type="hidden" name="action" value="confirm">
   <input type="hidden" name="rows_data" value="{{ rows_json }}">
-  <div class="actions-row">
-    <button type="submit" class="btn btn-primary">Confirm Import {{ preview_rows|length }} Leads</button>
+  <div style="display:flex;gap:8px;">
+    <button type="submit" class="btn btn-primary">
+      <i class="fa-solid fa-check"></i> Import {{ preview_rows|length }} Leads
+    </button>
     <a href="{{ url_for('upload') }}" class="btn btn-secondary">Cancel</a>
   </div>
 </form>

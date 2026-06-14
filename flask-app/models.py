@@ -8,6 +8,62 @@ db = SQLAlchemy()
 DATABASE_PATH = os.path.join(os.path.dirname(__file__), 'leads.db')
 
 
+class Campaign(db.Model):
+    __tablename__ = 'campaigns'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(255), nullable=False)
+    status = db.Column(db.String(50), default='draft')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    template_step1_id = db.Column(db.Integer, db.ForeignKey('templates.id'), nullable=True)
+    template_step2_id = db.Column(db.Integer, db.ForeignKey('templates.id'), nullable=True)
+    template_step3_id = db.Column(db.Integer, db.ForeignKey('templates.id'), nullable=True)
+
+    template_step1 = db.relationship('Template', foreign_keys=[template_step1_id])
+    template_step2 = db.relationship('Template', foreign_keys=[template_step2_id])
+    template_step3 = db.relationship('Template', foreign_keys=[template_step3_id])
+
+    @property
+    def leads_count(self):
+        return Lead.query.filter_by(campaign_id=self.id).count()
+
+    @property
+    def sent_count(self):
+        return Lead.query.filter(Lead.campaign_id == self.id, Lead.sequence_step > 0).count()
+
+    @property
+    def open_rate(self):
+        sent = self.sent_count
+        if not sent:
+            return 0.0
+        opened = Lead.query.filter_by(campaign_id=self.id, opened=True).count()
+        return round(opened / sent * 100, 1)
+
+    @property
+    def reply_rate(self):
+        sent = self.sent_count
+        if not sent:
+            return 0.0
+        replied = Lead.query.filter_by(campaign_id=self.id, replied=True).count()
+        return round(replied / sent * 100, 1)
+
+    @property
+    def click_rate(self):
+        sent = self.sent_count
+        if not sent:
+            return 0.0
+        clicked = Lead.query.filter_by(campaign_id=self.id, clicked=True).count()
+        return round(clicked / sent * 100, 1)
+
+    def status_color(self):
+        return {
+            'draft': 'gray',
+            'active': 'green',
+            'paused': 'yellow',
+            'complete': 'blue',
+        }.get(self.status, 'gray')
+
+
 class Lead(db.Model):
     __tablename__ = 'leads'
 
@@ -27,6 +83,9 @@ class Lead(db.Model):
     clicked = db.Column(db.Boolean, default=False)
     clicked_at = db.Column(db.DateTime)
     assigned_account = db.Column(db.String(255))
+    campaign_id = db.Column(db.Integer, db.ForeignKey('campaigns.id'), nullable=True)
+
+    campaign = db.relationship('Campaign', backref='leads', foreign_keys=[campaign_id])
 
     @property
     def full_name(self):
@@ -97,8 +156,10 @@ class EmailLog(db.Model):
     status = db.Column(db.String(50), default='sent')
     lead_email = db.Column(db.String(255))
     lead_name = db.Column(db.String(255))
+    campaign_id = db.Column(db.Integer, db.ForeignKey('campaigns.id'), nullable=True)
 
     lead = db.relationship('Lead', backref='logs')
+    campaign = db.relationship('Campaign', backref='logs')
 
 
 class Settings(db.Model):
@@ -136,4 +197,20 @@ def init_db(app):
     db.init_app(app)
     with app.app_context():
         db.create_all()
+        # Migrate: add new columns to existing tables if they don't exist
+        _run_migrations()
         Settings.get_singleton()
+
+
+def _run_migrations():
+    migrations = [
+        "ALTER TABLE leads ADD COLUMN campaign_id INTEGER REFERENCES campaigns(id)",
+        "ALTER TABLE email_logs ADD COLUMN campaign_id INTEGER REFERENCES campaigns(id)",
+    ]
+    with db.engine.connect() as conn:
+        for sql in migrations:
+            try:
+                conn.execute(db.text(sql))
+                conn.commit()
+            except Exception:
+                pass

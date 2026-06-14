@@ -1,108 +1,155 @@
 {% extends "base.html" %}
 {% block title %}Leads — OutreachCommand{% endblock %}
+{% block page_title %}Leads{% endblock %}
+{% block topbar_actions %}
+  <a href="{{ url_for('upload') }}" class="btn btn-primary btn-sm">
+    <i class="fa-solid fa-upload"></i> Upload CSV
+  </a>
+{% endblock %}
+
 {% block content %}
-<h1>Leads Management</h1>
+<!-- Filter bar -->
+<div class="filter-bar">
+  <form method="get" id="filter-form" style="display:contents;">
+    <div class="search-box">
+      <i class="fa-solid fa-magnifying-glass"></i>
+      <input type="search" name="q" id="search-input" value="{{ q }}" placeholder="Search name, email, company…">
+    </div>
+    <select name="status" class="filter-select" onchange="this.form.submit()">
+      <option value="all" {% if status == 'all' %}selected{% endif %}>All Leads</option>
+      <option value="pending" {% if status == 'pending' %}selected{% endif %}>Pending</option>
+      <option value="active" {% if status == 'active' %}selected{% endif %}>Active</option>
+      <option value="complete" {% if status == 'complete' %}selected{% endif %}>Complete</option>
+      <option value="paused" {% if status == 'paused' %}selected{% endif %}>Paused</option>
+      <option value="unsubscribed" {% if status == 'unsubscribed' %}selected{% endif %}>Unsubscribed</option>
+      <option value="replied" {% if status == 'replied' %}selected{% endif %}>Replied</option>
+    </select>
+    <button type="submit" class="btn btn-secondary btn-sm">Search</button>
+  </form>
+</div>
 
-<form method="get" class="filter-bar" id="filter-form">
-  <input type="search" name="q" id="search-input" value="{{ q }}" placeholder="Search name, email, company..." class="search-input">
-  <select name="status" onchange="this.form.submit()">
-    <option value="all" {% if status == 'all' %}selected{% endif %}>All</option>
-    <option value="pending" {% if status == 'pending' %}selected{% endif %}>Pending</option>
-    <option value="active" {% if status == 'active' %}selected{% endif %}>Active</option>
-    <option value="complete" {% if status == 'complete' %}selected{% endif %}>Complete</option>
-    <option value="paused" {% if status == 'paused' %}selected{% endif %}>Paused</option>
-    <option value="unsubscribed" {% if status == 'unsubscribed' %}selected{% endif %}>Unsubscribed</option>
-    <option value="replied" {% if status == 'replied' %}selected{% endif %}>Replied</option>
-  </select>
-  <button type="submit" class="btn btn-secondary">Search</button>
-</form>
-
-<form method="post" action="{{ url_for('leads_bulk_delete') }}" id="bulk-form" onsubmit="return confirm('Delete selected leads?');">
-  <div class="table-actions">
-    <button type="submit" class="btn btn-danger">Delete Selected</button>
-    <span class="muted">Showing {{ start }}–{{ end }} of {{ total }} leads</span>
+<form method="post" action="{{ url_for('leads_bulk_delete') }}" id="bulk-form">
+  <div class="table-toolbar">
+    <div style="display:flex;gap:8px;align-items:center;">
+      <button type="submit" class="btn btn-danger btn-sm" onclick="return confirmBulkDelete()">
+        <i class="fa-solid fa-trash"></i> Delete Selected
+      </button>
+      <span class="table-count">Showing {{ start }}–{{ end }} of {{ total }}</span>
+    </div>
   </div>
-  <table class="data-table">
-    <thead>
-      <tr>
-        <th><input type="checkbox" id="select-all" title="Select all"></th>
-        <th>Name</th>
-        <th>Email</th>
-        <th>Company</th>
-        <th>Step</th>
-        <th>Status</th>
-        <th>Last Sent</th>
-        <th>Account</th>
-        <th>Actions</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for lead in leads %}
-      <tr>
-        <td><input type="checkbox" name="lead_ids" value="{{ lead.id }}" class="lead-checkbox"></td>
-        <td>{{ lead.full_name }}</td>
-        <td>{{ lead.email }}</td>
-        <td>{{ lead.company or '—' }}</td>
-        <td>{{ lead.sequence_step }}/3</td>
-        <td><span class="badge badge-{{ lead.status_label().lower() }}">{{ lead.status_label() }}</span></td>
-        <td>{{ lead.last_sent_at.strftime('%Y-%m-%d %H:%M') if lead.last_sent_at else '—' }}</td>
-        <td>{{ lead.assigned_account or '—' }}</td>
-        <td class="actions">
-          {% if lead.paused %}
-          <form method="post" action="{{ url_for('lead_resume', lead_id=lead.id) }}" style="display:inline;">
-            <button type="submit" class="btn btn-sm btn-primary">Resume</button>
-          </form>
-          {% else %}
-          <form method="post" action="{{ url_for('lead_pause', lead_id=lead.id) }}" style="display:inline;">
-            <button type="submit" class="btn btn-sm btn-secondary">Pause</button>
-          </form>
-          {% endif %}
-          <form method="post" action="{{ url_for('lead_delete', lead_id=lead.id) }}" style="display:inline;" onsubmit="return confirm('Delete this lead?');">
-            <button type="submit" class="btn btn-sm btn-danger" title="Delete">&#128465;</button>
-          </form>
-        </td>
-      </tr>
-      {% else %}
-      <tr><td colspan="9" class="empty">No leads found.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th style="width:36px;"><input type="checkbox" id="select-all" style="cursor:pointer;"></th>
+          <th>Name</th>
+          <th>Email</th>
+          <th>Company</th>
+          <th>Step</th>
+          <th>Status</th>
+          <th>Last Sent</th>
+          <th>Account</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for lead in leads %}
+        <tr>
+          <td><input type="checkbox" name="lead_ids" value="{{ lead.id }}" class="lead-cb" style="cursor:pointer;"></td>
+          <td class="font-medium">{{ lead.full_name }}</td>
+          <td class="text-gray">{{ lead.email }}</td>
+          <td class="text-gray">{{ lead.company or '—' }}</td>
+          <td>{{ lead.sequence_step }}/3</td>
+          <td><span class="badge badge-{{ lead.status_label().lower() }}">{{ lead.status_label() }}</span></td>
+          <td class="muted">{{ lead.last_sent_at.strftime('%b %d') if lead.last_sent_at else '—' }}</td>
+          <td class="muted" style="font-size:11px;">{{ lead.assigned_account or '—' }}</td>
+          <td>
+            <div class="row-actions">
+              {% if lead.paused %}
+              <form method="post" action="{{ url_for('lead_resume', lead_id=lead.id) }}" style="display:inline;">
+                <button type="submit" class="btn btn-xs btn-primary" title="Resume">
+                  <i class="fa-solid fa-play"></i>
+                </button>
+              </form>
+              {% else %}
+              <form method="post" action="{{ url_for('lead_pause', lead_id=lead.id) }}" style="display:inline;">
+                <button type="submit" class="btn btn-xs btn-secondary" title="Pause">
+                  <i class="fa-solid fa-pause"></i>
+                </button>
+              </form>
+              {% endif %}
+              <form method="post" action="{{ url_for('lead_delete', lead_id=lead.id) }}" style="display:inline;" onsubmit="return confirm('Delete this lead?')">
+                <button type="submit" class="btn btn-xs btn-danger" title="Delete">
+                  <i class="fa-solid fa-trash"></i>
+                </button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="9">
+            <div class="empty-state">
+              <div class="empty-icon">👤</div>
+              <p>No leads found{% if q or status != 'all' %} matching your filters{% endif %}.</p>
+              <a href="{{ url_for('upload') }}" class="btn btn-primary btn-sm">Upload Leads</a>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </form>
 
 {% if pages > 1 %}
 <div class="pagination">
-  {% if page > 1 %}
-    <a href="?page={{ page - 1 }}&q={{ q }}&status={{ status }}">&laquo;</a>
-  {% endif %}
-  {% for p in range(1, pages + 1) %}
-    {% if p == page %}
-      <a href="?page={{ p }}&q={{ q }}&status={{ status }}" class="active">{{ p }}</a>
-    {% elif p <= 3 or p >= pages - 2 or (p >= page - 2 and p <= page + 2) %}
-      <a href="?page={{ p }}&q={{ q }}&status={{ status }}">{{ p }}</a>
-    {% elif p == 4 or p == pages - 3 %}
-      <span class="muted">…</span>
-    {% endif %}
+  {% if page > 1 %}<a href="?page={{ page-1 }}&q={{ q }}&status={{ status }}"><i class="fa-solid fa-chevron-left" style="font-size:10px;"></i></a>{% endif %}
+  {% for p in range(1, pages+1) %}
+    {% if p == page %}<a class="active">{{ p }}</a>
+    {% elif p <= 2 or p >= pages-1 or (p >= page-2 and p <= page+2) %}<a href="?page={{ p }}&q={{ q }}&status={{ status }}">{{ p }}</a>
+    {% elif p == 3 or p == pages-2 %}<span>…</span>{% endif %}
   {% endfor %}
-  {% if page < pages %}
-    <a href="?page={{ page + 1 }}&q={{ q }}&status={{ status }}">&raquo;</a>
-  {% endif %}
+  {% if page < pages %}<a href="?page={{ page+1 }}&q={{ q }}&status={{ status }}"><i class="fa-solid fa-chevron-right" style="font-size:10px;"></i></a>{% endif %}
 </div>
 {% endif %}
+
+<!-- Delete confirm modal -->
+<div class="modal-backdrop hidden" id="delete-modal">
+  <div class="modal-box">
+    <div class="modal-title"><i class="fa-solid fa-triangle-exclamation" style="color:#dc2626;"></i> Confirm Bulk Delete</div>
+    <p style="font-size:14px;color:#374151;">Are you sure you want to delete the selected leads? This cannot be undone.</p>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-secondary" onclick="document.getElementById('delete-modal').classList.add('hidden')">Cancel</button>
+      <button type="button" class="btn btn-danger" id="confirm-delete-btn">Delete</button>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
 document.getElementById('select-all').addEventListener('change', function() {
-  document.querySelectorAll('.lead-checkbox').forEach(cb => cb.checked = this.checked);
+  document.querySelectorAll('.lead-cb').forEach(cb => cb.checked = this.checked);
 });
 
-// Live search with debounce
-let searchTimer;
+function confirmBulkDelete() {
+  const checked = document.querySelectorAll('.lead-cb:checked');
+  if (!checked.length) { showToast('Select leads first', 'error'); return false; }
+  document.getElementById('delete-modal').classList.remove('hidden');
+  return false;
+}
+
+document.getElementById('confirm-delete-btn').addEventListener('click', () => {
+  document.getElementById('bulk-form').submit();
+});
+
+// Live search debounce
+let st;
 document.getElementById('search-input').addEventListener('input', function() {
-  clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => {
-    document.getElementById('filter-form').submit();
-  }, 500);
+  clearTimeout(st);
+  st = setTimeout(() => document.getElementById('filter-form').submit(), 500);
 });
 </script>
 {% endblock %}

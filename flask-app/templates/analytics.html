@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}Analytics — OutreachCommand{% endblock %}
+{% block page_title %}Analytics{% endblock %}
+{% block topbar_actions %}
+  <a href="?period=7" class="btn btn-sm {% if period == '7' %}btn-primary{% else %}btn-secondary{% endif %}">7 days</a>
+  <a href="?period=30" class="btn btn-sm {% if period == '30' %}btn-primary{% else %}btn-secondary{% endif %}">30 days</a>
+  <a href="?period=0" class="btn btn-sm {% if period == '0' %}btn-primary{% else %}btn-secondary{% endif %}">All time</a>
+{% endblock %}
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<!-- Stats cards -->
+<div class="stats-grid" style="grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));">
+  <div class="stat-card">
+    <div class="stat-label"><span class="stat-dot dot-blue"></span>Total Sent</div>
+    <div class="stat-value">{{ total_sent }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label"><span class="stat-dot dot-yellow"></span>Open Rate</div>
+    <div class="stat-value">{{ open_rate }}%</div>
+    <div class="stat-sub">{{ total_opened }} opens</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label"><span class="stat-dot dot-purple"></span>Click Rate</div>
+    <div class="stat-value">{{ click_rate }}%</div>
+    <div class="stat-sub">{{ total_clicked }} clicks</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label"><span class="stat-dot dot-green"></span>Reply Rate</div>
+    <div class="stat-value">{{ reply_rate }}%</div>
+    <div class="stat-sub">{{ total_replied }} replies</div>
+  </div>
+</div>
+
+<!-- Line chart -->
+<div class="chart-wrap">
+  <div class="chart-header">
+    <span class="chart-title">Activity Over Time</span>
+    <span class="muted">
+      {% if period == '7' %}Last 7 days
+      {% elif period == '0' %}All time
+      {% else %}Last 30 days{% endif %}
+    </span>
+  </div>
+  {% if total_sent > 0 %}
+  <canvas id="activityChart" height="80"></canvas>
+  {% else %}
+  <div class="empty-state" style="padding:32px;">
+    <div class="empty-icon">📊</div>
+    <p>No data for this period yet.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+{% if total_sent > 0 %}
+const ctx = document.getElementById('activityChart').getContext('2d');
+new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: {{ chart_labels|safe }},
+    datasets: [
+      {
+        label: 'Sent',
+        data: {{ chart_sent|safe }},
+        borderColor: '#2563eb',
+        backgroundColor: 'rgba(37,99,235,0.08)',
+        tension: 0.3,
+        fill: true,
+        pointRadius: 3,
+      },
+      {
+        label: 'Opened',
+        data: {{ chart_opened|safe }},
+        borderColor: '#d97706',
+        backgroundColor: 'rgba(217,119,6,0.05)',
+        tension: 0.3,
+        fill: false,
+        pointRadius: 3,
+      },
+      {
+        label: 'Clicked',
+        data: {{ chart_clicked|safe }},
+        borderColor: '#7c3aed',
+        backgroundColor: 'rgba(124,58,237,0.05)',
+        tension: 0.3,
+        fill: false,
+        pointRadius: 3,
+      },
+    ]
+  },
+  options: {
+    responsive: true,
+    plugins: {
+      legend: { position: 'bottom', labels: { font: { size: 12 }, padding: 16 } },
+      tooltip: { mode: 'index', intersect: false },
+    },
+    scales: {
+      x: { grid: { color: '#f3f4f6' }, ticks: { font: { size: 11 } } },
+      y: { grid: { color: '#f3f4f6' }, ticks: { font: { size: 11 }, stepSize: 1 }, beginAtZero: true },
+    },
+    interaction: { mode: 'nearest', axis: 'x', intersect: false },
+  }
+});
+{% endif %}
+</script>
+{% endblock %}

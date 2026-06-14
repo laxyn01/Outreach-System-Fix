@@ -1,74 +1,129 @@
 {% extends "base.html" %}
 {% block title %}Dashboard — OutreachCommand{% endblock %}
-{% block content %}
-<h1>Dashboard</h1>
-
-<div class="stats-grid">
-  <div class="stat-card"><span class="stat-label">Total Leads</span><span class="stat-value">{{ stats.total }}</span></div>
-  <div class="stat-card"><span class="stat-label">Active</span><span class="stat-value">{{ stats.active }}</span></div>
-  <div class="stat-card"><span class="stat-label">Sent</span><span class="stat-value">{{ stats.sent }}</span></div>
-  <div class="stat-card"><span class="stat-label">Opened</span><span class="stat-value">{{ stats.opened }}</span></div>
-  <div class="stat-card"><span class="stat-label">Open Rate</span><span class="stat-value">{{ stats.open_rate }}%</span></div>
-  <div class="stat-card"><span class="stat-label">Clicked</span><span class="stat-value">{{ stats.clicked }}</span></div>
-  <div class="stat-card"><span class="stat-label">Click Rate</span><span class="stat-value">{{ stats.click_rate }}%</span></div>
-  <div class="stat-card"><span class="stat-label">Replies</span><span class="stat-value">{{ stats.replies }}</span></div>
-  <div class="stat-card"><span class="stat-label">Unsubscribed</span><span class="stat-value">{{ stats.unsubbed }}</span></div>
-</div>
-
-<div class="status-bar">
-  {% if stats.schedule_status == 'outside_window' %}
-    <span class="badge badge-warn">Sending paused — outside schedule</span>
-  {% elif stats.schedule_status == 'rate_limit' and stats.next_send_mins is not none %}
-    <span class="badge badge-info">Next send in {{ stats.next_send_mins }} minute(s)</span>
-  {% else %}
-    <span class="badge badge-ok">Scheduler active</span>
-  {% endif %}
-  {% if stats.last_sent_mins is not none %}
-    <span class="muted">Last email sent: {{ stats.last_sent_mins }} minute(s) ago</span>
-  {% else %}
-    <span class="muted">No emails sent yet</span>
-  {% endif %}
-</div>
-
-<div class="actions-row">
-  <button type="button" id="trigger-btn" class="btn btn-primary">Trigger Sequence Now</button>
+{% block page_title %}Dashboard{% endblock %}
+{% block topbar_actions %}
+  <button id="trigger-btn" class="btn btn-primary btn-sm">
+    <i class="fa-solid fa-bolt"></i> Trigger Send
+  </button>
   <form method="post" action="{{ url_for('check_replies_route') }}" style="display:inline;">
-    <button type="submit" class="btn btn-secondary">Check Replies Now</button>
+    <button type="submit" class="btn btn-secondary btn-sm">
+      <i class="fa-solid fa-inbox"></i> Check Replies
+    </button>
   </form>
-</div>
-<div id="trigger-result" class="trigger-result hidden"></div>
+{% endblock %}
 
-<h2>Recent Leads Pipeline</h2>
-<table class="data-table">
-  <thead>
-    <tr>
-      <th>Name</th>
-      <th>Email</th>
-      <th>Company</th>
-      <th>Step</th>
-      <th>Status</th>
-      <th>Account</th>
-      <th>Opened</th>
-      <th>Replied</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for lead in leads %}
-    <tr>
-      <td>{{ lead.full_name }}</td>
-      <td>{{ lead.email }}</td>
-      <td>{{ lead.company or '—' }}</td>
-      <td>{{ lead.sequence_step }}/3</td>
-      <td><span class="badge badge-{{ lead.status_label().lower() }}">{{ lead.status_label() }}</span></td>
-      <td>{{ lead.assigned_account or '—' }}</td>
-      <td>{{ 'Yes' if lead.opened else 'No' }}</td>
-      <td>{{ 'Yes' if lead.replied else 'No' }}</td>
-    </tr>
-    {% else %}
-    <tr><td colspan="8" class="empty">No leads yet. <a href="{{ url_for('upload') }}">Upload CSV</a></td></tr>
-    {% endfor %}
-  </tbody>
-</table>
+{% block content %}
+<!-- Schedule status banner -->
+{% if stats.schedule_status == 'outside_window' %}
+<div class="status-banner paused">
+  <i class="fa-solid fa-clock"></i> Sending paused — outside schedule window
+</div>
+{% elif stats.schedule_status == 'rate_limit' %}
+<div class="status-banner rate">
+  <i class="fa-solid fa-hourglass-half"></i>
+  Next send in {{ stats.next_send_mins or 1 }} min(s)
+  {% if stats.last_sent_mins is not none %}&nbsp;·&nbsp;Last sent {{ stats.last_sent_mins }} min(s) ago{% endif %}
+</div>
+{% else %}
+<div class="status-banner active">
+  <i class="fa-solid fa-circle-check"></i> Scheduler active
+  {% if stats.last_sent_mins is not none %}&nbsp;·&nbsp;Last sent {{ stats.last_sent_mins }} min(s) ago{% endif %}
+</div>
+{% endif %}
+
+<!-- Trigger result -->
+<div id="trigger-result" class="hidden" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:14px;margin-bottom:16px;font-family:monospace;font-size:13px;white-space:pre-wrap;"></div>
+
+<!-- Stats grid -->
+<div class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-label"><span class="stat-dot dot-gray"></span>Total Leads</div>
+    <div class="stat-value">{{ stats.total }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label"><span class="stat-dot dot-blue"></span>Active</div>
+    <div class="stat-value">{{ stats.active }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label"><span class="stat-dot dot-green"></span>Emails Sent</div>
+    <div class="stat-value">{{ stats.sent }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label"><span class="stat-dot dot-yellow"></span>Open Rate</div>
+    <div class="stat-value">{{ stats.open_rate }}%</div>
+    <div class="stat-sub">{{ stats.opened }} opens</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label"><span class="stat-dot dot-purple"></span>Click Rate</div>
+    <div class="stat-value">{{ stats.click_rate }}%</div>
+    <div class="stat-sub">{{ stats.clicked }} clicks</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label"><span class="stat-dot dot-green"></span>Reply Rate</div>
+    <div class="stat-value">{{ stats.reply_rate }}%</div>
+    <div class="stat-sub">{{ stats.replies }} replies</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label"><span class="stat-dot dot-red"></span>Unsubscribed</div>
+    <div class="stat-value">{{ stats.unsubbed }}</div>
+  </div>
+</div>
+
+<!-- Campaigns overview -->
+{% if campaigns %}
+<div class="section-header">
+  <span class="section-title">Active Campaigns</span>
+  <a href="{{ url_for('campaigns_page') }}" class="btn btn-ghost btn-sm">View all <i class="fa-solid fa-arrow-right"></i></a>
+</div>
+<div class="table-wrap" style="margin-bottom:24px;">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Name</th><th>Status</th><th>Leads</th><th>Sent</th><th>Opens</th><th>Replies</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in campaigns %}
+      <tr>
+        <td class="font-medium">{{ c.name }}</td>
+        <td><span class="badge badge-{{ c.status_color() }}">{{ c.status }}</span></td>
+        <td>{{ c.leads_count }}</td>
+        <td>{{ c.sent_count }}</td>
+        <td>{{ c.open_rate }}%</td>
+        <td>{{ c.reply_rate }}%</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<!-- Recent sends -->
+<div class="section-header">
+  <span class="section-title">Recent Sends</span>
+  <a href="{{ url_for('logs_page') }}" class="btn btn-ghost btn-sm">View logs <i class="fa-solid fa-arrow-right"></i></a>
+</div>
+<div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr><th>Lead</th><th>Subject</th><th>Step</th><th>Sent</th><th>Status</th><th>Opened</th></tr>
+    </thead>
+    <tbody>
+      {% for log in recent_logs %}
+      <tr>
+        <td>{{ log.lead_name or log.lead_email or '—' }}</td>
+        <td class="text-gray">{{ (log.subject or '—')[:50] }}</td>
+        <td>{{ log.step }}</td>
+        <td class="muted">{{ log.sent_at.strftime('%b %d %H:%M') if log.sent_at else '—' }}</td>
+        <td><span class="badge badge-{{ log.status }}">{{ log.status }}</span></td>
+        <td>{% if log.opened_at %}<span class="badge badge-green">Yes</span>{% else %}<span class="muted">No</span>{% endif %}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="empty-state"><p>No emails sent yet. Configure accounts and upload leads to get started.</p></td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -77,20 +132,24 @@ document.getElementById('trigger-btn').addEventListener('click', async () => {
   const btn = document.getElementById('trigger-btn');
   const box = document.getElementById('trigger-result');
   btn.disabled = true;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Sending...';
   box.classList.remove('hidden');
-  box.textContent = 'Sending...';
-  box.className = 'trigger-result';
+  box.textContent = 'Checking for eligible leads...';
   try {
     const res = await fetch('{{ url_for("trigger_sequence") }}', { method: 'POST' });
     const data = await res.json();
-    const ok = data.sent > 0;
-    box.className = 'trigger-result ' + (ok ? 'success' : 'warn');
     box.textContent = JSON.stringify(data, null, 2);
+    if (data.sent > 0) {
+      showToast(`Sent to ${data.lead} (step ${data.step})`, 'success');
+    } else {
+      showToast(data.reason || 'No email sent', 'error');
+    }
   } catch (e) {
-    box.className = 'trigger-result error';
     box.textContent = 'Error: ' + e.message;
+    showToast('Request failed', 'error');
   } finally {
     btn.disabled = false;
+    btn.innerHTML = '<i class="fa-solid fa-bolt"></i> Trigger Send';
   }
 });
 </script>
