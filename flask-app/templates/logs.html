@@ -46,10 +46,9 @@
         <td class="muted">{{ log.sent_at.strftime('%b %d %H:%M') if log.sent_at else '—' }}</td>
         <td>
           {% if log.opened_at %}
-            <span class="badge badge-green">Yes</span>
-            <span class="muted" style="font-size:11px;">{{ log.opened_at.strftime('%b %d') }}</span>
-            {% if log.open_count and log.open_count > 1 %}<span class="muted">({{ log.open_count }}x)</span>{% endif %}
-          {% else %}<span class="muted">—</span>{% endif %}
+            <span class="badge badge-green">{% if log.open_count and log.open_count > 1 %}{{ log.open_count }}x{% else %}1x{% endif %}</span>
+            <div class="muted" style="font-size:11px;margin-top:2px;">{{ log.opened_at.strftime('%b %d %H:%M') }}</div>
+          {% else %}<span class="muted">No</span>{% endif %}
         </td>
         <td>
           {% if log.clicked %}

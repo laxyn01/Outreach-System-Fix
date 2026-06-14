@@ -116,7 +116,12 @@
         <td>{{ log.step }}</td>
         <td class="muted">{{ log.sent_at.strftime('%b %d %H:%M') if log.sent_at else '—' }}</td>
         <td><span class="badge badge-{{ log.status }}">{{ log.status }}</span></td>
-        <td>{% if log.opened_at %}<span class="badge badge-green">Yes</span>{% else %}<span class="muted">No</span>{% endif %}</td>
+        <td>
+          {% if log.opened_at %}
+            <span class="badge badge-green">{% if log.open_count and log.open_count > 1 %}{{ log.open_count }}x{% else %}1x{% endif %}</span>
+            <div class="muted" style="font-size:11px;margin-top:2px;">{{ log.opened_at.strftime('%b %d %H:%M') }}</div>
+          {% else %}<span class="muted">No</span>{% endif %}
+        </td>
       </tr>
       {% else %}
       <tr><td colspan="6" class="empty-state"><p>No emails sent yet. Configure accounts and upload leads to get started.</p></td></tr>
