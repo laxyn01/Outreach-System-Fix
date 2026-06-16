@@ -6,13 +6,13 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formataddr
 
-from models import Campaign, EmailAccount, EmailLog, Lead, Settings, Template, db
+from models import Campaign, CampaignLead, EmailAccount, EmailLog, Lead, Settings, Template, db
 from sequence import (
-    advance_sequence_step,
+    advance_campaign_lead_step,
     get_available_accounts,
     is_within_send_window,
     pick_account,
-    pick_next_lead,
+    pick_next_campaign_lead,
     pick_template,
 )
 from spintax import parse_spintax
@@ -38,7 +38,7 @@ def clean_email(raw: str):
 
 
 def _get_fresh_settings():
-    """FIX 1: always re-query settings from DB, never use stale SQLAlchemy cache."""
+    """Always re-query settings from DB, never use stale SQLAlchemy cache."""
     db.session.expire_all()
     return Settings.get_singleton()
 
@@ -51,7 +51,7 @@ def prepare_content(subject_raw: str, body_raw: str, lead, settings, step: int, 
 
     lead.pitch_text = settings.pitch_text or ''
 
-    # Bug fix #2: spintax FIRST, then placeholder replacement
+    # spintax FIRST, then placeholder replacement
     subject = parse_spintax(subject_raw or '')
     body = parse_spintax(body_raw or '')
 
@@ -61,7 +61,6 @@ def prepare_content(subject_raw: str, body_raw: str, lead, settings, step: int, 
     plain, html = ensure_html_wrapper(body, False)
     if html and tracking_enabled:
         html = wrap_links(html, lead.id, step, base_url)
-        # Bug fix #7: tracking pixel at VERY TOP of body
         html = inject_tracking_pixel(html, lead.id, step, base_url)
 
     plain, html = append_unsubscribe(plain, html, lead.id, base_url)
@@ -76,11 +75,9 @@ def prepare_template_content(template, lead, settings, step: int):
 def send_smtp(account: EmailAccount, to_email: str, subject: str, plain: str, html: str, sender_name: str = ''):
     msg = MIMEMultipart('alternative')
     msg['Subject'] = subject
-    # FIX 1: always use the actual sender name
     display = (sender_name or '').strip() or account.email_address
     msg['From'] = formataddr((display, account.email_address))
     msg['To'] = to_email
-    # Anti-promotions headers
     msg['X-Mailer'] = 'Microsoft Outlook 16.0'
     msg['X-Priority'] = '3'
     msg['Importance'] = 'Normal'
@@ -113,11 +110,8 @@ def send_test_email(account: EmailAccount) -> dict:
         return {'ok': False, 'message': str(e)}
 
 
-def _pick_campaign_content(lead, step: int):
-    """FIX 2: pick subject+body from campaign steps_json, random variant if A/B."""
-    if not lead.campaign_id:
-        return None, None
-    campaign = Campaign.query.get(lead.campaign_id)
+def _pick_campaign_content(campaign: Campaign, step: int):
+    """Pick subject+body from campaign steps_json; random variant for A/B."""
     if not campaign:
         return None, None
     steps = campaign.get_steps()
@@ -130,39 +124,21 @@ def _pick_campaign_content(lead, step: int):
     variants = step_data.get('variants', [])
     if not variants:
         return None, None
-    # Randomly pick one variant for A/B
     variant = random.choice(variants)
     return variant.get('subject', ''), variant.get('body', '')
 
 
-def _campaign_tracking_enabled(lead):
-    if not lead.campaign_id:
-        return True
-    c = Campaign.query.get(lead.campaign_id)
-    return c.tracking_enabled if c else True
-
-
-def _campaign_stop_on_reply(lead):
-    if not lead.campaign_id:
-        return True
-    c = Campaign.query.get(lead.campaign_id)
-    return c.stop_on_reply if c else True
-
-
-def _total_steps_for_lead(lead):
-    """How many steps does this lead's campaign have?"""
-    if not lead.campaign_id:
-        return 3  # default 3-step sequence
-    c = Campaign.query.get(lead.campaign_id)
-    if c:
-        steps = c.get_steps()
-        if steps:
-            return len(steps)
-    return 3
+def _pick_legacy_template(campaign: Campaign, step: int):
+    """Fall back to the legacy template FK on the campaign."""
+    if not campaign:
+        return None
+    tid = getattr(campaign, f'template_step{step}_id', None)
+    if tid:
+        return Template.query.get(tid)
+    return None
 
 
 def try_send_next_email() -> dict:
-    # FIX 1: always re-query settings fresh
     settings = _get_fresh_settings()
     now = datetime.utcnow()
 
@@ -176,9 +152,16 @@ def try_send_next_email() -> dict:
     if not is_within_send_window(settings, now):
         return {'sent': 0, 'skipped': 1, 'errors': [], 'reason': 'outside_window'}
 
-    lead = pick_next_lead(now)
-    if not lead:
+    # ── Pick next CampaignLead (never uses Lead.sequence_step) ───────────────
+    cl = pick_next_campaign_lead(now)
+    if not cl:
         return {'sent': 0, 'skipped': 1, 'errors': [], 'reason': 'no_lead'}
+
+    lead = cl.lead
+    campaign = cl.campaign
+    steps = campaign.get_steps() if campaign else []
+    total_steps = len(steps) if steps else 3
+    step = cl.sequence_step + 1  # step number to send (1-indexed)
 
     accounts = get_available_accounts(settings)
     account = pick_account(accounts, lead)
@@ -189,28 +172,29 @@ def try_send_next_email() -> dict:
             'reason': 'no_account',
         }
 
-    step = lead.sequence_step + 1
-
-    # FIX 2: try campaign steps_json first, fall back to template model
-    subject_raw, body_raw = _pick_campaign_content(lead, step)
+    # ── Pick content: campaign steps_json → legacy template → default ────────
+    subject_raw, body_raw = _pick_campaign_content(campaign, step)
     if subject_raw is None:
-        # Fall back to legacy template model
-        template = _pick_legacy_campaign_template(lead, step) or pick_template(step)
+        template = _pick_legacy_template(campaign, step) or pick_template(step)
         if not template:
             return {'sent': 0, 'skipped': 1, 'errors': [f'No template for step {step}'], 'reason': 'no_template'}
         subject_raw = template.subject
         body_raw = template.body
 
-    tracking_on = _campaign_tracking_enabled(lead)
+    tracking_on = campaign.tracking_enabled if campaign else True
     subject, plain, html = prepare_content(subject_raw, body_raw, lead, settings, step, tracking_on)
-
-    # FIX 1: use fresh sender_name from DB
     sender_name = (settings.sender_name or '').strip() or 'Your Name'
 
     try:
         send_smtp(account, lead.email, subject, plain, html, sender_name)
-        advance_sequence_step(lead, now)
+
+        # ── Advance CampaignLead (not Lead) ───────────────────────────────────
+        advance_campaign_lead_step(cl, now, steps)
+        cl.assigned_account = account.email_address
+
+        # Also update Lead.assigned_account for IMAP reply matching
         lead.assigned_account = account.email_address
+
         account.daily_sent_count += 1
         settings.next_allowed_send_at = now + timedelta(seconds=random.randint(60, 120))
 
@@ -224,7 +208,7 @@ def try_send_next_email() -> dict:
             status='sent',
             lead_email=lead.email,
             lead_name=lead.full_name,
-            campaign_id=lead.campaign_id,
+            campaign_id=cl.campaign_id,
         )
         db.session.add(log)
         db.session.commit()
@@ -232,6 +216,7 @@ def try_send_next_email() -> dict:
             'sent': 1, 'skipped': 0, 'errors': [],
             'lead': lead.email, 'step': step, 'account': account.email_address,
         }
+
     except Exception as e:
         log = EmailLog(
             lead_id=lead.id,
@@ -243,23 +228,11 @@ def try_send_next_email() -> dict:
             status='failed',
             lead_email=lead.email,
             lead_name=lead.full_name,
-            campaign_id=lead.campaign_id,
+            campaign_id=cl.campaign_id,
         )
         db.session.add(log)
         db.session.commit()
         return {'sent': 0, 'skipped': 1, 'errors': [f'{lead.email}: {str(e)}'], 'reason': 'send_failed'}
-
-
-def _pick_legacy_campaign_template(lead, step):
-    if not lead.campaign_id:
-        return None
-    campaign = Campaign.query.get(lead.campaign_id)
-    if not campaign:
-        return None
-    tid = getattr(campaign, f'template_step{step}_id', None)
-    if tid:
-        return Template.query.get(tid)
-    return None
 
 
 WARMUP_SUBJECTS = ['Quick question', 'Checking in', 'Hey', 'Following up', 'Hello there']

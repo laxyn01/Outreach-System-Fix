@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import or_
 
-from models import EmailAccount, Lead, Settings, db
+from models import Campaign, CampaignLead, EmailAccount, Lead, Settings, db
 
 
 def is_within_send_window(settings: Settings, now_utc: datetime) -> bool:
@@ -31,35 +31,50 @@ def is_within_send_window(settings: Settings, now_utc: datetime) -> bool:
     return start <= local <= end
 
 
-def pick_next_lead(now: datetime) -> 'Lead | None':
-    # FIX 2/4: only send to leads in active campaigns (or no campaign assigned)
-    from models import Campaign
+def pick_next_campaign_lead(now: datetime) -> 'CampaignLead | None':
+    """Return the next CampaignLead ready to be emailed.
+
+    Filters:
+    - campaign must be active
+    - lead must not be globally unsubscribed, replied, or paused
+    - CampaignLead must not be finished or replied in this campaign
+    - next_send_at must be NULL (step 1 not yet sent) or <= now
+    """
     return (
-        Lead.query.outerjoin(Campaign, Lead.campaign_id == Campaign.id)
+        CampaignLead.query
+        .join(Campaign, CampaignLead.campaign_id == Campaign.id)
+        .join(Lead, CampaignLead.lead_id == Lead.id)
         .filter(
+            CampaignLead.finished.is_(False),
+            CampaignLead.replied.is_(False),
+            Campaign.status == 'active',
             Lead.unsubscribed.is_(False),
             Lead.replied.is_(False),
             Lead.paused.is_(False),
-            Lead.sequence_step < 3,
-            or_(Lead.next_send_at.is_(None), Lead.next_send_at <= now),
-            or_(Lead.campaign_id.is_(None), Campaign.status == 'active'),
+            or_(CampaignLead.next_send_at.is_(None), CampaignLead.next_send_at <= now),
         )
-        .order_by(Lead.id)
+        .order_by(CampaignLead.id)
         .first()
     )
 
 
-def advance_sequence_step(lead: Lead, now: datetime):
-    lead.last_sent_at = now
-    if lead.sequence_step == 0:
-        lead.sequence_step = 1
-        lead.next_send_at = now + timedelta(days=3)
-    elif lead.sequence_step == 1:
-        lead.sequence_step = 2
-        lead.next_send_at = now + timedelta(days=4)
-    elif lead.sequence_step == 2:
-        lead.sequence_step = 3
-        lead.next_send_at = None
+def advance_campaign_lead_step(cl: 'CampaignLead', now: datetime, steps: list):
+    """Advance cl to the next step after a successful send.
+
+    steps: parsed campaign.get_steps() list
+    """
+    total_steps = len(steps) if steps else 3
+    cl.last_sent_at = now
+    cl.sequence_step += 1
+
+    if cl.sequence_step >= total_steps:
+        cl.finished = True
+        cl.next_send_at = None
+    else:
+        # wait_days from the NEXT step's definition
+        next_step_data = steps[cl.sequence_step] if cl.sequence_step < len(steps) else {}
+        wait_days = max(1, int(next_step_data.get('wait_days', 3)))
+        cl.next_send_at = now + timedelta(days=wait_days)
 
 
 def get_available_accounts(settings: Settings) -> list:
@@ -87,6 +102,39 @@ def pick_account(accounts: list, lead: Lead) -> 'EmailAccount | None':
                 return acc
     idx = lead.id % len(accounts)
     return accounts[idx]
+
+
+# ── Legacy pick_next_lead kept for backwards compat (not used by scheduler) ──
+
+def pick_next_lead(now: datetime) -> 'Lead | None':
+    """Legacy — only used if CampaignLead table is empty or missing."""
+    return (
+        Lead.query.outerjoin(Campaign, Lead.campaign_id == Campaign.id)
+        .filter(
+            Lead.unsubscribed.is_(False),
+            Lead.replied.is_(False),
+            Lead.paused.is_(False),
+            Lead.sequence_step < 3,
+            or_(Lead.next_send_at.is_(None), Lead.next_send_at <= now),
+            or_(Lead.campaign_id.is_(None), Campaign.status == 'active'),
+        )
+        .order_by(Lead.id)
+        .first()
+    )
+
+
+def advance_sequence_step(lead: Lead, now: datetime):
+    """Legacy — kept for backwards compat."""
+    lead.last_sent_at = now
+    if lead.sequence_step == 0:
+        lead.sequence_step = 1
+        lead.next_send_at = now + timedelta(days=3)
+    elif lead.sequence_step == 1:
+        lead.sequence_step = 2
+        lead.next_send_at = now + timedelta(days=4)
+    elif lead.sequence_step == 2:
+        lead.sequence_step = 3
+        lead.next_send_at = None
 
 
 DEFAULT_TEMPLATES = {

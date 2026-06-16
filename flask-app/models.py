@@ -31,18 +31,18 @@ class Campaign(db.Model):
     name = db.Column(db.String(255), nullable=False)
     status = db.Column(db.String(50), default='draft')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    # Legacy template FKs (still supported)
+    # Legacy template FKs
     template_step1_id = db.Column(db.Integer, db.ForeignKey('templates.id'), nullable=True)
     template_step2_id = db.Column(db.Integer, db.ForeignKey('templates.id'), nullable=True)
     template_step3_id = db.Column(db.Integer, db.ForeignKey('templates.id'), nullable=True)
-    # FIX 2: Steps stored as JSON array — each step: {id, wait_days, variants:[{subject,body}]}
+    # Steps as JSON: [{wait_days, variants:[{subject, body}]}]
     steps_json = db.Column(db.Text, default='[]')
-    # Per-campaign schedule (overrides global settings when set)
+    # Per-campaign schedule
     campaign_schedule_start = db.Column(db.String(10), default='')
     campaign_schedule_end = db.Column(db.String(10), default='')
     campaign_timezone = db.Column(db.String(100), default='')
     campaign_active_days = db.Column(db.String(100), default='')
-    campaign_daily_limit = db.Column(db.Integer, default=0)  # 0 = use global
+    campaign_daily_limit = db.Column(db.Integer, default=0)
     tracking_enabled = db.Column(db.Boolean, default=True)
     stop_on_reply = db.Column(db.Boolean, default=True)
 
@@ -51,7 +51,6 @@ class Campaign(db.Model):
     template_step3 = db.relationship('Template', foreign_keys=[template_step3_id])
 
     def get_steps(self):
-        """Return parsed steps list from steps_json."""
         import json
         if not self.steps_json:
             return []
@@ -60,20 +59,25 @@ class Campaign(db.Model):
         except Exception:
             return []
 
+    # ── Campaign stats from CampaignLead (per-campaign, not global Lead fields) ──
+
     @property
     def leads_count(self):
-        return Lead.query.filter_by(campaign_id=self.id).count()
+        return CampaignLead.query.filter_by(campaign_id=self.id).count()
 
     @property
     def sent_count(self):
-        return Lead.query.filter(Lead.campaign_id == self.id, Lead.sequence_step > 0).count()
+        return CampaignLead.query.filter(
+            CampaignLead.campaign_id == self.id,
+            CampaignLead.sequence_step > 0,
+        ).count()
 
     @property
     def open_rate(self):
         sent = self.sent_count
         if not sent:
             return 0.0
-        opened = Lead.query.filter_by(campaign_id=self.id, opened=True).count()
+        opened = CampaignLead.query.filter_by(campaign_id=self.id, opened=True).count()
         return round(opened / sent * 100, 1)
 
     @property
@@ -81,7 +85,7 @@ class Campaign(db.Model):
         sent = self.sent_count
         if not sent:
             return 0.0
-        replied = Lead.query.filter_by(campaign_id=self.id, replied=True).count()
+        replied = CampaignLead.query.filter_by(campaign_id=self.id, replied=True).count()
         return round(replied / sent * 100, 1)
 
     @property
@@ -89,7 +93,7 @@ class Campaign(db.Model):
         sent = self.sent_count
         if not sent:
             return 0.0
-        clicked = Lead.query.filter_by(campaign_id=self.id, clicked=True).count()
+        clicked = CampaignLead.query.filter_by(campaign_id=self.id, clicked=True).count()
         return round(clicked / sent * 100, 1)
 
     def status_color(self):
@@ -109,6 +113,8 @@ class Lead(db.Model):
     last_name = db.Column(db.String(120))
     email = db.Column(db.String(255), unique=True, nullable=False, index=True)
     company = db.Column(db.String(255))
+    # NOTE: sequence_step/last_sent_at/next_send_at on Lead are legacy.
+    # All sending now uses CampaignLead rows. Kept for backfill reference.
     sequence_step = db.Column(db.Integer, default=0)
     last_sent_at = db.Column(db.DateTime)
     next_send_at = db.Column(db.DateTime)
@@ -141,6 +147,51 @@ class Lead(db.Model):
         if self.sequence_step < 3:
             return 'Active'
         return 'Complete'
+
+
+class CampaignLead(db.Model):
+    """Per-campaign progress for a lead. One row per (campaign_id, lead_id).
+    The scheduler only reads/writes CampaignLead — never Lead.sequence_step.
+    This lets the same email address be enrolled in multiple campaigns independently."""
+    __tablename__ = 'campaign_leads'
+    __table_args__ = (
+        db.UniqueConstraint('campaign_id', 'lead_id', name='uq_campaign_lead'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    campaign_id = db.Column(db.Integer, db.ForeignKey('campaigns.id'), nullable=False, index=True)
+    lead_id = db.Column(db.Integer, db.ForeignKey('leads.id'), nullable=False, index=True)
+
+    sequence_step = db.Column(db.Integer, default=0)   # steps sent so far (0 = not yet sent)
+    last_sent_at = db.Column(db.DateTime)
+    next_send_at = db.Column(db.DateTime)               # NULL = ready to send step 1
+    finished = db.Column(db.Boolean, default=False)     # True once all steps are done
+
+    # Per-campaign engagement tracking
+    opened = db.Column(db.Boolean, default=False)
+    opened_at = db.Column(db.DateTime)
+    clicked = db.Column(db.Boolean, default=False)
+    clicked_at = db.Column(db.DateTime)
+    replied = db.Column(db.Boolean, default=False)
+
+    assigned_account = db.Column(db.String(255))
+
+    lead = db.relationship('Lead', backref='campaign_memberships')
+    campaign = db.relationship('Campaign', backref='campaign_leads_assoc')
+
+    def status_label(self):
+        lead = self.lead
+        if lead and lead.unsubscribed:
+            return 'Unsubscribed'
+        if self.replied or (lead and lead.replied):
+            return 'Replied'
+        if lead and lead.paused:
+            return 'Paused'
+        if self.finished:
+            return 'Complete'
+        if self.sequence_step == 0:
+            return 'Pending'
+        return 'Active'
 
 
 class EmailAccount(db.Model):
@@ -220,14 +271,12 @@ class Settings(db.Model):
         row = cls.query.get(1)
         if not row:
             row = cls(id=1)
-            # FIX 4: auto-detect public URL on first create
             auto_url = _detect_public_url()
             if auto_url:
                 row.tracking_base_url = auto_url
             db.session.add(row)
             db.session.commit()
         else:
-            # FIX 4: update if still at localhost default
             if row.tracking_base_url in ('http://localhost:5000', ''):
                 auto_url = _detect_public_url()
                 if auto_url:
@@ -243,6 +292,7 @@ def init_db(app):
     with app.app_context():
         db.create_all()
         _run_migrations()
+        _backfill_campaign_leads()
         Settings.get_singleton()
 
 
@@ -266,3 +316,34 @@ def _run_migrations():
                 conn.commit()
             except Exception:
                 pass
+
+
+def _backfill_campaign_leads():
+    """One-time: create CampaignLead rows for leads that already have a campaign_id
+    but no campaign_leads row. Preserves their existing sequence_step so nothing resets."""
+    sql = db.text("""
+        INSERT OR IGNORE INTO campaign_leads
+            (campaign_id, lead_id, sequence_step, last_sent_at,
+             finished, opened, opened_at, clicked, clicked_at,
+             replied, assigned_account)
+        SELECT
+            l.campaign_id,
+            l.id,
+            l.sequence_step,
+            l.last_sent_at,
+            CASE WHEN l.sequence_step >= 3 THEN 1 ELSE 0 END,
+            l.opened,
+            l.opened_at,
+            l.clicked,
+            l.clicked_at,
+            l.replied,
+            l.assigned_account
+        FROM leads l
+        WHERE l.campaign_id IS NOT NULL
+    """)
+    try:
+        with db.engine.connect() as conn:
+            conn.execute(sql)
+            conn.commit()
+    except Exception:
+        pass

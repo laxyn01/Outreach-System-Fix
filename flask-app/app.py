@@ -18,7 +18,7 @@ from flask import (
 from dotenv import load_dotenv
 from sqlalchemy import func
 
-from models import Campaign, EmailAccount, EmailLog, Lead, Settings, Template, db, init_db
+from models import Campaign, CampaignLead, EmailAccount, EmailLog, Lead, Settings, Template, db, init_db
 from email_sender import (
     clean_email,
     preview_template,
@@ -83,14 +83,14 @@ def get_dashboard_stats():
     settings = Settings.get_singleton()
     now = datetime.utcnow()
     total = Lead.query.count()
-    active = Lead.query.filter(
-        Lead.sequence_step.in_([1, 2]),
-        Lead.unsubscribed.is_(False),
-        Lead.replied.is_(False),
+    # Stats from CampaignLead — per-campaign, not global Lead fields
+    sent = CampaignLead.query.filter(CampaignLead.sequence_step > 0).count()
+    active = CampaignLead.query.filter(
+        CampaignLead.sequence_step > 0,
+        CampaignLead.finished.is_(False),
     ).count()
-    sent = Lead.query.filter(Lead.sequence_step > 0).count()
-    opened = Lead.query.filter_by(opened=True).count()
-    clicked = Lead.query.filter_by(clicked=True).count()
+    opened = CampaignLead.query.filter_by(opened=True).count()
+    clicked = CampaignLead.query.filter_by(clicked=True).count()
     replies = Lead.query.filter_by(replied=True).count()
     unsubbed = Lead.query.filter_by(unsubscribed=True).count()
     open_rate = round((opened / sent * 100) if sent else 0, 1)
@@ -152,6 +152,29 @@ def check_replies_route():
 
 # ─── Campaigns ──────────────────────────────────────────────────────────────
 
+def _add_lead_to_campaign(email: str, first_name: str, last_name: str, company: str, campaign_id: int) -> bool:
+    """Find or create a Lead, then create a fresh CampaignLead row for this campaign.
+    Returns True if a new CampaignLead was created (i.e. lead not already enrolled)."""
+    lead = Lead.query.filter_by(email=email).first()
+    if not lead:
+        lead = Lead(
+            first_name=first_name,
+            last_name=last_name,
+            email=email,
+            company=company,
+            campaign_id=campaign_id,
+        )
+        db.session.add(lead)
+        db.session.flush()
+    # Always enroll a fresh CampaignLead — sequence_step starts at 0 regardless
+    # of what other campaigns this lead has been in.
+    existing = CampaignLead.query.filter_by(campaign_id=campaign_id, lead_id=lead.id).first()
+    if existing:
+        return False
+    cl = CampaignLead(campaign_id=campaign_id, lead_id=lead.id)
+    db.session.add(cl)
+    return True
+
 @app.route('/campaigns')
 def campaigns_page():
     campaigns = Campaign.query.order_by(Campaign.created_at.desc()).all()
@@ -195,19 +218,14 @@ def campaign_new():
                 email = clean_email(row.get('email', ''))
                 if not email:
                     continue
-                existing = Lead.query.filter_by(email=email).first()
-                if existing:
-                    if not existing.campaign_id:
-                        existing.campaign_id = campaign.id
-                else:
-                    lead = Lead(
-                        first_name=row.get('first_name', ''),
-                        last_name=row.get('last_name', ''),
-                        email=email,
-                        company=row.get('company', ''),
-                        campaign_id=campaign.id,
-                    )
-                    db.session.add(lead)
+                added = _add_lead_to_campaign(
+                    email=email,
+                    first_name=row.get('first_name', ''),
+                    last_name=row.get('last_name', ''),
+                    company=row.get('company', ''),
+                    campaign_id=campaign.id,
+                )
+                if added:
                     imported += 1
 
         # Step 4: launch immediately if requested
@@ -348,18 +366,14 @@ def campaign_edit(campaign_id):
                     email = clean_email(row.get('email', ''))
                     if not email:
                         continue
-                    existing = Lead.query.filter_by(email=email).first()
-                    if existing:
-                        if not existing.campaign_id:
-                            existing.campaign_id = campaign_id
-                    else:
-                        db.session.add(Lead(
-                            first_name=row.get('first_name', ''),
-                            last_name=row.get('last_name', ''),
-                            email=email,
-                            company=row.get('company', ''),
-                            campaign_id=campaign_id,
-                        ))
+                    added = _add_lead_to_campaign(
+                        email=email,
+                        first_name=row.get('first_name', ''),
+                        last_name=row.get('last_name', ''),
+                        company=row.get('company', ''),
+                        campaign_id=campaign_id,
+                    )
+                    if added:
                         imported += 1
             db.session.commit()
             flash(f'Imported {imported} leads.', 'success')
@@ -374,7 +388,13 @@ def campaign_edit(campaign_id):
             return redirect(url_for('campaign_edit', campaign_id=campaign_id, tab='analytics'))
 
     analytics = _get_campaign_analytics(campaign_id)
-    campaign_leads = Lead.query.filter_by(campaign_id=campaign_id).order_by(Lead.id.desc()).all()
+    # Use CampaignLead rows — shows per-campaign step, not global Lead.sequence_step
+    campaign_leads = (
+        CampaignLead.query
+        .filter_by(campaign_id=campaign_id)
+        .order_by(CampaignLead.id.desc())
+        .all()
+    )
     timezones = [
         'Asia/Kolkata', 'America/New_York', 'America/Los_Angeles',
         'America/Chicago', 'Europe/London', 'Europe/Berlin',
@@ -884,17 +904,26 @@ def track_open(lead_id, step):
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '0'
     try:
+        now_ts = datetime.utcnow()
+        log = EmailLog.query.filter_by(lead_id=lead_id, step=step).order_by(
+            EmailLog.sent_at.desc()
+        ).first()
+        if log:
+            log.opened_at = now_ts
+            log.open_count = (log.open_count or 0) + 1
+            # Update per-campaign engagement
+            cl = CampaignLead.query.filter_by(
+                campaign_id=log.campaign_id, lead_id=lead_id
+            ).first()
+            if cl and not cl.opened:
+                cl.opened = True
+                cl.opened_at = now_ts
+        # Also flag on global Lead for legacy queries
         lead = Lead.query.get(lead_id)
         if lead:
             lead.opened = True
-            lead.opened_at = datetime.utcnow()
-            log = EmailLog.query.filter_by(lead_id=lead_id, step=step).order_by(
-                EmailLog.sent_at.desc()
-            ).first()
-            if log:
-                log.opened_at = datetime.utcnow()
-                log.open_count = (log.open_count or 0) + 1
-            db.session.commit()
+            lead.opened_at = now_ts
+        db.session.commit()
     except Exception:
         pass
     return response
@@ -903,16 +932,27 @@ def track_open(lead_id, step):
 @app.route('/track/click/<int:lead_id>/<int:step>')
 def track_click(lead_id, step):
     url = request.args.get('url', '/')
-    lead = Lead.query.get(lead_id)
-    if lead:
-        lead.clicked = True
-        if not lead.clicked_at:
-            lead.clicked_at = datetime.utcnow()
-        log = EmailLog.query.filter_by(lead_id=lead_id, step=step).order_by(EmailLog.sent_at.desc()).first()
+    try:
+        now_ts = datetime.utcnow()
+        log = EmailLog.query.filter_by(lead_id=lead_id, step=step).order_by(
+            EmailLog.sent_at.desc()
+        ).first()
         if log:
             log.clicked = True
-            log.clicked_at = log.clicked_at or datetime.utcnow()
+            log.clicked_at = log.clicked_at or now_ts
+            cl = CampaignLead.query.filter_by(
+                campaign_id=log.campaign_id, lead_id=lead_id
+            ).first()
+            if cl and not cl.clicked:
+                cl.clicked = True
+                cl.clicked_at = now_ts
+        lead = Lead.query.get(lead_id)
+        if lead:
+            lead.clicked = True
+            lead.clicked_at = lead.clicked_at or now_ts
         db.session.commit()
+    except Exception:
+        pass
     return redirect(url)
 
 

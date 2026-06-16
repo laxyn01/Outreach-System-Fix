@@ -1,6 +1,6 @@
 import imaplib
 
-from models import EmailAccount, Lead, db
+from models import CampaignLead, EmailAccount, Lead, db
 
 
 def check_replies() -> dict:
@@ -27,6 +27,10 @@ def check_replies() -> dict:
                         if ids:
                             lead.replied = True
                             replies_found += 1
+                            # Mark all campaign memberships replied + finished
+                            for cl in CampaignLead.query.filter_by(lead_id=lead.id).all():
+                                cl.replied = True
+                                cl.finished = True
                 except Exception:
                     pass
             mail.logout()
