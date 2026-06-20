@@ -264,6 +264,9 @@ def campaign_resume(campaign_id):
 @app.route('/campaigns/<int:campaign_id>/delete', methods=['POST'])
 def campaign_delete(campaign_id):
     c = Campaign.query.get_or_404(campaign_id)
+    # Delete FK-dependent rows first to avoid NOT NULL constraint errors
+    CampaignLead.query.filter_by(campaign_id=campaign_id).delete(synchronize_session=False)
+    EmailLog.query.filter_by(campaign_id=campaign_id).delete(synchronize_session=False)
     db.session.delete(c)
     db.session.commit()
     flash('Campaign deleted.', 'success')
@@ -894,39 +897,63 @@ def settings_page():
 # ─── Tracking ────────────────────────────────────────────────────────────────
 
 TRACKING_GIF = base64.b64decode('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7')
+_GIF_LEN = str(len(TRACKING_GIF))
+
+
+def _mark_opened(lead_id: int, step: int):
+    """Shared helper: record an open event on EmailLog, CampaignLead, and Lead."""
+    now_ts = datetime.utcnow()
+    log = EmailLog.query.filter_by(lead_id=lead_id, step=step).order_by(
+        EmailLog.sent_at.desc()
+    ).first()
+    if log:
+        if not log.opened_at:
+            log.opened_at = now_ts
+        log.open_count = (log.open_count or 0) + 1
+        cl = CampaignLead.query.filter_by(
+            campaign_id=log.campaign_id, lead_id=lead_id
+        ).first()
+        if cl and not cl.opened:
+            cl.opened = True
+            cl.opened_at = now_ts
+    lead = Lead.query.get(lead_id)
+    if lead and not lead.opened:
+        lead.opened = True
+        lead.opened_at = now_ts
+    db.session.commit()
+
+
+def _gif_response():
+    """Return a properly-headered 1x1 GIF response."""
+    resp = Response(TRACKING_GIF, mimetype='image/gif')
+    resp.headers['Content-Length'] = _GIF_LEN
+    resp.headers['Content-Type'] = 'image/gif'
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    return resp
+
+
+@app.route('/r/<int:lead_id>/<int:step>.gif')
+def track_open_clean(lead_id, step):
+    """Clean tracking pixel URL — no 'track'/'open' keywords to trip spam filters."""
+    resp = _gif_response()
+    try:
+        _mark_opened(lead_id, step)
+    except Exception:
+        pass
+    return resp
 
 
 @app.route('/track/open/<int:lead_id>/<int:step>')
 def track_open(lead_id, step):
-    # FIX 4: build response FIRST, wrap DB ops in try/except — pixel always returns
-    response = Response(TRACKING_GIF, mimetype='image/gif')
-    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-    response.headers['Pragma'] = 'no-cache'
-    response.headers['Expires'] = '0'
+    """Legacy URL kept for emails already sent before the URL was changed."""
+    resp = _gif_response()
     try:
-        now_ts = datetime.utcnow()
-        log = EmailLog.query.filter_by(lead_id=lead_id, step=step).order_by(
-            EmailLog.sent_at.desc()
-        ).first()
-        if log:
-            log.opened_at = now_ts
-            log.open_count = (log.open_count or 0) + 1
-            # Update per-campaign engagement
-            cl = CampaignLead.query.filter_by(
-                campaign_id=log.campaign_id, lead_id=lead_id
-            ).first()
-            if cl and not cl.opened:
-                cl.opened = True
-                cl.opened_at = now_ts
-        # Also flag on global Lead for legacy queries
-        lead = Lead.query.get(lead_id)
-        if lead:
-            lead.opened = True
-            lead.opened_at = now_ts
-        db.session.commit()
+        _mark_opened(lead_id, step)
     except Exception:
         pass
-    return response
+    return resp
 
 
 @app.route('/track/click/<int:lead_id>/<int:step>')
@@ -940,16 +967,27 @@ def track_click(lead_id, step):
         if log:
             log.clicked = True
             log.clicked_at = log.clicked_at or now_ts
+            # Clicking a link is an implicit open (pixel may have been blocked)
+            if not log.opened_at:
+                log.opened_at = now_ts
+            log.open_count = (log.open_count or 0) + 1
             cl = CampaignLead.query.filter_by(
                 campaign_id=log.campaign_id, lead_id=lead_id
             ).first()
-            if cl and not cl.clicked:
-                cl.clicked = True
-                cl.clicked_at = now_ts
+            if cl:
+                if not cl.clicked:
+                    cl.clicked = True
+                    cl.clicked_at = now_ts
+                if not cl.opened:
+                    cl.opened = True
+                    cl.opened_at = now_ts
         lead = Lead.query.get(lead_id)
         if lead:
             lead.clicked = True
             lead.clicked_at = lead.clicked_at or now_ts
+            if not lead.opened:
+                lead.opened = True
+                lead.opened_at = now_ts
         db.session.commit()
     except Exception:
         pass
@@ -961,6 +999,26 @@ def unsubscribe(lead_id):
     lead = Lead.query.get(lead_id)
     if lead:
         lead.unsubscribed = True
+        # Clicking unsubscribe is an implicit open (pixel may have been blocked)
+        if not lead.opened:
+            lead.opened = True
+            lead.opened_at = datetime.utcnow()
+        # Mark the most-recent email log as opened too
+        try:
+            log = EmailLog.query.filter_by(lead_id=lead_id, log_type='campaign').order_by(
+                EmailLog.sent_at.desc()
+            ).first()
+            if log and not log.opened_at:
+                log.opened_at = datetime.utcnow()
+                log.open_count = (log.open_count or 0) + 1
+                cl = CampaignLead.query.filter_by(
+                    campaign_id=log.campaign_id, lead_id=lead_id
+                ).first()
+                if cl and not cl.opened:
+                    cl.opened = True
+                    cl.opened_at = datetime.utcnow()
+        except Exception:
+            pass
         db.session.commit()
         name = lead.first_name or 'there'
         return render_template('unsubscribe.html', name=name)

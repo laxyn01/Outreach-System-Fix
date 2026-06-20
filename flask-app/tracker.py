@@ -40,15 +40,14 @@ def wrap_links(html: str, lead_id: int, step: int, base_url: str) -> str:
 
 
 def inject_tracking_pixel(html: str, lead_id: int, step: int, base_url: str) -> str:
-    """Bug fix #7: inject pixel at VERY TOP of body before any text."""
+    """Inject a 1x1 pixel at the very top of <body>.
+    Uses a clean /<lead_id>/<step>.gif path — no 'track'/'open' keywords to trip spam filters."""
     base_url = base_url.rstrip('/')
     pixel = (
-        f'<img src="{base_url}/track/open/{lead_id}/{step}" '
-        f'width="1" height="1" '
-        f'style="position:absolute;top:0;left:0;opacity:0;pointer-events:none;" '
+        f'<img src="{base_url}/r/{lead_id}/{step}.gif" '
+        f'width="1" height="1" style="display:block;width:1px;height:1px;border:0;" '
         f'alt="" border="0">'
     )
-    # Insert right after <body...> tag
     body_match = re.search(r'<body[^>]*>', html, re.IGNORECASE)
     if body_match:
         insert_pos = body_match.end()

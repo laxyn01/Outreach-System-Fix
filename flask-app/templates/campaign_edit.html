@@ -455,9 +455,10 @@ function renderEditor() {
           <span style="font-size:11px;color:#9ca3af;">Spintax: {Hi|Hello|Hey} {first_name}</span>
         </label>
         <div class="seq-toolbar">
-          <button type="button" onclick="wrapSel('**','**')" title="Bold"><b>B</b></button>
-          <button type="button" onclick="wrapSel('_','_')" title="Italic"><i>I</i></button>
-          <button type="button" onclick="insertLink()" title="Link">🔗</button>
+          <button type="button" onclick="wrapSel('<b>','</b>')" title="Bold"><b>B</b></button>
+          <button type="button" onclick="wrapSel('<i>','</i>')" title="Italic"><i>I</i></button>
+          <button type="button" onclick="insertLink()" title="Insert link" style="font-size:13px;">🔗</button>
+          <button type="button" onclick="insertImage()" title="Insert image / video thumbnail" style="font-size:13px;">🖼</button>
           <button type="button" onclick="insertBreak()" title="Line break">↵</button>
           <select style="padding:3px 6px;border:1px solid #e5e7eb;border-radius:4px;font-size:11px;cursor:pointer;" onchange="insertPlaceholder(this.value);this.value=''">
             <option value="">+ placeholder</option>
@@ -537,16 +538,35 @@ function insertBreak() {
   steps[selStep].variants[selVariant].body = ta.value;
 }
 
-function insertLink() {
-  const url = prompt('Enter URL:');
-  if (!url) return;
+function _insertAtCursor(text) {
   const ta = document.getElementById('step-body');
   if (!ta) return;
-  const pos = ta.selectionStart;
-  ta.value = ta.value.slice(0, pos) + url + ta.value.slice(pos);
-  ta.setSelectionRange(pos, pos + url.length);
+  const start = ta.selectionStart, end = ta.selectionEnd;
+  ta.value = ta.value.slice(0, start) + text + ta.value.slice(end);
+  const newPos = start + text.length;
+  ta.setSelectionRange(newPos, newPos);
   ta.focus();
   steps[selStep].variants[selVariant].body = ta.value;
+}
+
+function insertLink() {
+  const ta = document.getElementById('step-body');
+  if (!ta) return;
+  const selected = ta.value.slice(ta.selectionStart, ta.selectionEnd);
+  const url = prompt('Link URL (e.g. https://example.com):');
+  if (!url) return;
+  const label = prompt('Link text:', selected || url);
+  if (label === null) return;
+  _insertAtCursor(`<a href="${url}">${label || url}</a>`);
+}
+
+function insertImage() {
+  const imgUrl = prompt('Image URL (thumbnail to display):');
+  if (!imgUrl) return;
+  const linkUrl = prompt('URL when image is clicked:', imgUrl);
+  if (linkUrl === null) return;
+  const snippet = `<a href="${linkUrl || imgUrl}"><img src="${imgUrl}" width="300" style="max-width:100%;border-radius:4px;display:block;" alt=""></a>`;
+  _insertAtCursor(snippet);
 }
 
 function insertPlaceholder(ph) {
