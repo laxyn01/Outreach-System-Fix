@@ -728,6 +728,16 @@ def account_test(account_id):
     return jsonify(result)
 
 
+@app.route('/test-smtp/<int:account_id>', methods=['POST'])
+def test_smtp(account_id):
+    """Alias for /accounts/<id>/test — always returns JSON {ok, message}."""
+    acc = EmailAccount.query.get(account_id)
+    if not acc:
+        return jsonify({'ok': False, 'message': f'Account {account_id} not found.'}), 404
+    result = send_test_email(acc)
+    return jsonify(result)
+
+
 @app.route('/accounts/<int:account_id>/warmup', methods=['POST'])
 def account_warmup(account_id):
     acc = EmailAccount.query.get_or_404(account_id)

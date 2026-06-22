@@ -9,10 +9,12 @@ from email.utils import formataddr
 from models import Campaign, CampaignLead, EmailAccount, EmailLog, Lead, Settings, Template, db
 from sequence import (
     advance_campaign_lead_step,
+    advance_sequence_step,
     get_available_accounts,
     is_within_send_window,
     pick_account,
     pick_next_campaign_lead,
+    pick_next_lead,
     pick_template,
 )
 from spintax import parse_spintax
@@ -152,16 +154,69 @@ def try_send_next_email() -> dict:
     if not is_within_send_window(settings, now):
         return {'sent': 0, 'skipped': 1, 'errors': [], 'reason': 'outside_window'}
 
-    # ── Pick next CampaignLead (never uses Lead.sequence_step) ───────────────
+    # ── Pick next CampaignLead (preferred path) ───────────────────────────────
     cl = pick_next_campaign_lead(now)
-    if not cl:
-        return {'sent': 0, 'skipped': 1, 'errors': [], 'reason': 'no_lead'}
 
-    lead = cl.lead
-    campaign = cl.campaign
-    steps = campaign.get_steps() if campaign else []
-    total_steps = len(steps) if steps else 3
-    step = cl.sequence_step + 1  # step number to send (1-indexed)
+    if cl:
+        # ── CampaignLead path ────────────────────────────────────────────────
+        lead = cl.lead
+        campaign = cl.campaign
+        steps = campaign.get_steps() if campaign else []
+        total_steps = len(steps) if steps else 3
+        step = cl.sequence_step + 1
+
+        accounts = get_available_accounts(settings)
+        account = pick_account(accounts, lead)
+        if not account:
+            return {
+                'sent': 0, 'skipped': 1,
+                'errors': ['No email accounts available or daily limit reached.'],
+                'reason': 'no_account',
+            }
+
+        subject_raw, body_raw = _pick_campaign_content(campaign, step)
+        if subject_raw is None:
+            template = _pick_legacy_template(campaign, step) or pick_template(step)
+            if not template:
+                return {'sent': 0, 'skipped': 1, 'errors': [f'No template for step {step}'], 'reason': 'no_template'}
+            subject_raw = template.subject
+            body_raw = template.body
+
+        tracking_on = campaign.tracking_enabled if campaign else True
+        subject, plain, html = prepare_content(subject_raw, body_raw, lead, settings, step, tracking_on)
+        sender_name = (settings.sender_name or '').strip() or 'Your Name'
+
+        try:
+            send_smtp(account, lead.email, subject, plain, html, sender_name)
+            advance_campaign_lead_step(cl, now, steps)
+            cl.assigned_account = account.email_address
+            lead.assigned_account = account.email_address
+            account.daily_sent_count += 1
+            settings.next_allowed_send_at = now + timedelta(seconds=random.randint(60, 120))
+            log = EmailLog(
+                lead_id=lead.id, account_used=account.email_address, step=step,
+                subject=subject, sent_at=now, log_type='campaign', status='sent',
+                lead_email=lead.email, lead_name=lead.full_name, campaign_id=cl.campaign_id,
+            )
+            db.session.add(log)
+            db.session.commit()
+            return {'sent': 1, 'skipped': 0, 'errors': [], 'lead': lead.email, 'step': step, 'account': account.email_address}
+        except Exception as e:
+            log = EmailLog(
+                lead_id=lead.id, account_used=account.email_address, step=step,
+                subject=subject, sent_at=now, log_type='campaign', status='failed',
+                lead_email=lead.email, lead_name=lead.full_name, campaign_id=cl.campaign_id,
+            )
+            db.session.add(log)
+            db.session.commit()
+            return {'sent': 0, 'skipped': 1, 'errors': [f'{lead.email}: {str(e)}'], 'reason': 'send_failed'}
+
+    # ── Fallback: legacy Lead.sequence_step path ──────────────────────────────
+    # Used when no CampaignLead rows exist (e.g. leads imported before CampaignLead
+    # table existed and the backfill didn't run, or leads with no campaign_id).
+    lead = pick_next_lead(now)
+    if not lead:
+        return {'sent': 0, 'skipped': 1, 'errors': [], 'reason': 'no_lead'}
 
     accounts = get_available_accounts(settings)
     account = pick_account(accounts, lead)
@@ -172,10 +227,11 @@ def try_send_next_email() -> dict:
             'reason': 'no_account',
         }
 
-    # ── Pick content: campaign steps_json → legacy template → default ────────
+    step = lead.sequence_step + 1
+    campaign = Campaign.query.get(lead.campaign_id) if lead.campaign_id else None
     subject_raw, body_raw = _pick_campaign_content(campaign, step)
     if subject_raw is None:
-        template = _pick_legacy_template(campaign, step) or pick_template(step)
+        template = (_pick_legacy_template(campaign, step) if campaign else None) or pick_template(step)
         if not template:
             return {'sent': 0, 'skipped': 1, 'errors': [f'No template for step {step}'], 'reason': 'no_template'}
         subject_raw = template.subject
@@ -187,48 +243,24 @@ def try_send_next_email() -> dict:
 
     try:
         send_smtp(account, lead.email, subject, plain, html, sender_name)
-
-        # ── Advance CampaignLead (not Lead) ───────────────────────────────────
-        advance_campaign_lead_step(cl, now, steps)
-        cl.assigned_account = account.email_address
-
-        # Also update Lead.assigned_account for IMAP reply matching
+        advance_sequence_step(lead, now)
         lead.assigned_account = account.email_address
-
         account.daily_sent_count += 1
         settings.next_allowed_send_at = now + timedelta(seconds=random.randint(60, 120))
-
         log = EmailLog(
-            lead_id=lead.id,
-            account_used=account.email_address,
-            step=step,
-            subject=subject,
-            sent_at=now,
-            log_type='campaign',
-            status='sent',
-            lead_email=lead.email,
-            lead_name=lead.full_name,
-            campaign_id=cl.campaign_id,
+            lead_id=lead.id, account_used=account.email_address, step=step,
+            subject=subject, sent_at=now, log_type='campaign', status='sent',
+            lead_email=lead.email, lead_name=lead.full_name,
+            campaign_id=lead.campaign_id,
         )
         db.session.add(log)
         db.session.commit()
-        return {
-            'sent': 1, 'skipped': 0, 'errors': [],
-            'lead': lead.email, 'step': step, 'account': account.email_address,
-        }
-
+        return {'sent': 1, 'skipped': 0, 'errors': [], 'lead': lead.email, 'step': step, 'account': account.email_address, 'path': 'legacy'}
     except Exception as e:
         log = EmailLog(
-            lead_id=lead.id,
-            account_used=account.email_address,
-            step=step,
-            subject=subject,
-            sent_at=now,
-            log_type='campaign',
-            status='failed',
-            lead_email=lead.email,
-            lead_name=lead.full_name,
-            campaign_id=cl.campaign_id,
+            lead_id=lead.id, account_used=account.email_address, step=step,
+            subject=subject, sent_at=now, log_type='campaign', status='failed',
+            lead_email=lead.email, lead_name=lead.full_name, campaign_id=lead.campaign_id,
         )
         db.session.add(log)
         db.session.commit()
