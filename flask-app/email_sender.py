@@ -1,3 +1,4 @@
+import base64
 import json
 import random
 import smtplib
@@ -53,7 +54,6 @@ def prepare_content(subject_raw: str, body_raw: str, lead, settings, step: int, 
 
     lead.pitch_text = settings.pitch_text or ''
 
-    # spintax FIRST, then placeholder replacement
     subject = parse_spintax(subject_raw or '')
     body = parse_spintax(body_raw or '')
 
@@ -98,6 +98,63 @@ def send_smtp(account: EmailAccount, to_email: str, subject: str, plain: str, ht
         server.sendmail(account.email_address, to_email, msg.as_string())
 
 
+# ── NEW: Gmail API sender ─────────────────────────────────────────────────────
+
+def send_gmail_api(account: EmailAccount, to_email: str, subject: str, plain: str, html: str, sender_name: str = ''):
+    """Send email via Gmail API using stored OAuth token."""
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
+    from googleapiclient.discovery import build
+
+    token_data = json.loads(account.oauth_token)
+    creds = Credentials(
+        token=token_data.get('token'),
+        refresh_token=token_data.get('refresh_token'),
+        token_uri='https://oauth2.googleapis.com/token',
+        client_id=token_data.get('client_id'),
+        client_secret=token_data.get('client_secret'),
+        scopes=token_data.get('scopes'),
+    )
+
+    # Auto-refresh if expired
+    if creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+        # Save refreshed token back to DB
+        token_data['token'] = creds.token
+        account.oauth_token = json.dumps(token_data)
+        db.session.commit()
+
+    service = build('gmail', 'v1', credentials=creds)
+
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = subject
+    display = (sender_name or '').strip() or account.email_address
+    msg['From'] = formataddr((display, account.email_address))
+    msg['To'] = to_email
+    msg['X-Mailer'] = 'Microsoft Outlook 16.0'
+    msg['X-Priority'] = '3'
+    msg['Importance'] = 'Normal'
+    msg['Precedence'] = 'bulk'
+
+    if plain:
+        msg.attach(MIMEText(plain, 'plain', 'utf-8'))
+    if html:
+        msg.attach(MIMEText(html, 'html', 'utf-8'))
+
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+    service.users().messages().send(userId='me', body={'raw': raw}).execute()
+
+
+def _send_email(account: EmailAccount, to_email: str, subject: str, plain: str, html: str, sender_name: str = ''):
+    """Smart dispatcher — uses OAuth if available, falls back to SMTP."""
+    if account.auth_type == 'oauth' and account.oauth_token:
+        send_gmail_api(account, to_email, subject, plain, html, sender_name)
+    else:
+        send_smtp(account, to_email, subject, plain, html, sender_name)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
 def send_test_email(account: EmailAccount) -> dict:
     try:
         subject = 'SMTP Test — OutreachCommand'
@@ -106,14 +163,13 @@ def send_test_email(account: EmailAccount) -> dict:
             f'Sent at {datetime.utcnow().isoformat()} UTC\n\n'
             f'If you see this, SMTP is working correctly.'
         )
-        send_smtp(account, account.email_address, subject, plain, '', account.email_address)
+        _send_email(account, account.email_address, subject, plain, '', account.email_address)
         return {'ok': True, 'message': 'Test email sent successfully.'}
     except Exception as e:
         return {'ok': False, 'message': str(e)}
 
 
 def _pick_campaign_content(campaign: Campaign, step: int):
-    """Pick subject+body from campaign steps_json; random variant for A/B."""
     if not campaign:
         return None, None
     steps = campaign.get_steps()
@@ -131,7 +187,6 @@ def _pick_campaign_content(campaign: Campaign, step: int):
 
 
 def _pick_legacy_template(campaign: Campaign, step: int):
-    """Fall back to the legacy template FK on the campaign."""
     if not campaign:
         return None
     tid = getattr(campaign, f'template_step{step}_id', None)
@@ -154,11 +209,9 @@ def try_send_next_email() -> dict:
     if not is_within_send_window(settings, now):
         return {'sent': 0, 'skipped': 1, 'errors': [], 'reason': 'outside_window'}
 
-    # ── Pick next CampaignLead (preferred path) ───────────────────────────────
     cl = pick_next_campaign_lead(now)
 
     if cl:
-        # ── CampaignLead path ────────────────────────────────────────────────
         lead = cl.lead
         campaign = cl.campaign
         steps = campaign.get_steps() if campaign else []
@@ -187,7 +240,7 @@ def try_send_next_email() -> dict:
         sender_name = (settings.sender_name or '').strip() or 'Your Name'
 
         try:
-            send_smtp(account, lead.email, subject, plain, html, sender_name)
+            _send_email(account, lead.email, subject, plain, html, sender_name)
             advance_campaign_lead_step(cl, now, steps)
             cl.assigned_account = account.email_address
             lead.assigned_account = account.email_address
@@ -211,9 +264,7 @@ def try_send_next_email() -> dict:
             db.session.commit()
             return {'sent': 0, 'skipped': 1, 'errors': [f'{lead.email}: {str(e)}'], 'reason': 'send_failed'}
 
-    # ── Fallback: legacy Lead.sequence_step path ──────────────────────────────
-    # Used when no CampaignLead rows exist (e.g. leads imported before CampaignLead
-    # table existed and the backfill didn't run, or leads with no campaign_id).
+    # Fallback: legacy Lead.sequence_step path
     lead = pick_next_lead(now)
     if not lead:
         return {'sent': 0, 'skipped': 1, 'errors': [], 'reason': 'no_lead'}
@@ -242,7 +293,7 @@ def try_send_next_email() -> dict:
     sender_name = (settings.sender_name or '').strip() or 'Your Name'
 
     try:
-        send_smtp(account, lead.email, subject, plain, html, sender_name)
+        _send_email(account, lead.email, subject, plain, html, sender_name)
         advance_sequence_step(lead, now)
         lead.assigned_account = account.email_address
         account.daily_sent_count += 1
@@ -296,7 +347,7 @@ def try_send_warmup_email() -> dict:
         subject = random.choice(WARMUP_SUBJECTS)
         body = random.choice(WARMUP_BODIES)
         try:
-            send_smtp(account, to_addr, subject, body, '', settings.sender_name or '')
+            _send_email(account, to_addr, subject, body, '', settings.sender_name or '')
             account.daily_sent_count += 1
             log = EmailLog(
                 account_used=account.email_address,
@@ -334,7 +385,6 @@ def preview_template(template_id: int) -> dict:
 
 
 def preview_step_content(subject_raw: str, body_raw: str, step: int = 1) -> dict:
-    """Preview arbitrary subject/body with sample lead data."""
     settings = _get_fresh_settings()
 
     class SampleLead:
