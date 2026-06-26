@@ -59,8 +59,6 @@ class Campaign(db.Model):
         except Exception:
             return []
 
-    # ── Campaign stats from CampaignLead (per-campaign, not global Lead fields) ──
-
     @property
     def leads_count(self):
         return CampaignLead.query.filter_by(campaign_id=self.id).count()
@@ -113,8 +111,6 @@ class Lead(db.Model):
     last_name = db.Column(db.String(120))
     email = db.Column(db.String(255), unique=True, nullable=False, index=True)
     company = db.Column(db.String(255))
-    # NOTE: sequence_step/last_sent_at/next_send_at on Lead are legacy.
-    # All sending now uses CampaignLead rows. Kept for backfill reference.
     sequence_step = db.Column(db.Integer, default=0)
     last_sent_at = db.Column(db.DateTime)
     next_send_at = db.Column(db.DateTime)
@@ -150,9 +146,6 @@ class Lead(db.Model):
 
 
 class CampaignLead(db.Model):
-    """Per-campaign progress for a lead. One row per (campaign_id, lead_id).
-    The scheduler only reads/writes CampaignLead — never Lead.sequence_step.
-    This lets the same email address be enrolled in multiple campaigns independently."""
     __tablename__ = 'campaign_leads'
     __table_args__ = (
         db.UniqueConstraint('campaign_id', 'lead_id', name='uq_campaign_lead'),
@@ -162,12 +155,11 @@ class CampaignLead(db.Model):
     campaign_id = db.Column(db.Integer, db.ForeignKey('campaigns.id'), nullable=False, index=True)
     lead_id = db.Column(db.Integer, db.ForeignKey('leads.id'), nullable=False, index=True)
 
-    sequence_step = db.Column(db.Integer, default=0)   # steps sent so far (0 = not yet sent)
+    sequence_step = db.Column(db.Integer, default=0)
     last_sent_at = db.Column(db.DateTime)
-    next_send_at = db.Column(db.DateTime)               # NULL = ready to send step 1
-    finished = db.Column(db.Boolean, default=False)     # True once all steps are done
+    next_send_at = db.Column(db.DateTime)
+    finished = db.Column(db.Boolean, default=False)
 
-    # Per-campaign engagement tracking
     opened = db.Column(db.Boolean, default=False)
     opened_at = db.Column(db.DateTime)
     clicked = db.Column(db.Boolean, default=False)
@@ -199,13 +191,16 @@ class EmailAccount(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     email_address = db.Column(db.String(255), unique=True, nullable=False)
-    app_password = db.Column(db.String(255), nullable=False)
+    app_password = db.Column(db.String(255), nullable=False, default='')
     smtp_host = db.Column(db.String(255), default='smtp.gmail.com')
     smtp_port = db.Column(db.Integer, default=587)
     daily_sent_count = db.Column(db.Integer, default=0)
     last_reset_date = db.Column(db.Date, default=datetime.utcnow)
     warmup_enabled = db.Column(db.Boolean, default=False)
     warmup_day = db.Column(db.Integer, default=1)
+    # ── NEW: OAuth support ──
+    auth_type = db.Column(db.String(10), default='smtp')   # 'smtp' or 'oauth'
+    oauth_token = db.Column(db.Text, default=None)          # JSON token from Google
 
     def reset_daily_if_needed(self):
         today = datetime.utcnow().date()
@@ -308,6 +303,9 @@ def _run_migrations():
         "ALTER TABLE campaigns ADD COLUMN campaign_daily_limit INTEGER DEFAULT 0",
         "ALTER TABLE campaigns ADD COLUMN tracking_enabled INTEGER DEFAULT 1",
         "ALTER TABLE campaigns ADD COLUMN stop_on_reply INTEGER DEFAULT 1",
+        # NEW: OAuth columns
+        "ALTER TABLE email_accounts ADD COLUMN auth_type TEXT DEFAULT 'smtp'",
+        "ALTER TABLE email_accounts ADD COLUMN oauth_token TEXT DEFAULT NULL",
     ]
     with db.engine.connect() as conn:
         for sql in migrations:
@@ -319,8 +317,6 @@ def _run_migrations():
 
 
 def _backfill_campaign_leads():
-    """One-time: create CampaignLead rows for leads that already have a campaign_id
-    but no campaign_leads row. Preserves their existing sequence_step so nothing resets."""
     sql = db.text("""
         INSERT OR IGNORE INTO campaign_leads
             (campaign_id, lead_id, sequence_step, last_sent_at,
