@@ -1,7 +1,8 @@
+import json
+from google_auth_oauthlib.flow import Flow
 import base64
 import csv
 import io
-import json
 import os
 from datetime import datetime, timedelta
 
@@ -1036,6 +1037,98 @@ def unsubscribe(lead_id):
         return render_template('unsubscribe.html', name=name)
     return render_template('unsubscribe.html', name='there')
 
+# ─── Gmail OAuth Routes ──────────────────────────────────────────────────────
+# Paste these routes AFTER the existing accounts routes in app.py
+# Also add these imports at the top of app.py:
+#   import json
+#   from google_auth_oauthlib.flow import Flow
+
+@app.route('/accounts/connect-gmail')
+def connect_gmail():
+    """Start OAuth flow — redirects user to Google login."""
+    import json
+    from google_auth_oauthlib.flow import Flow
+
+    client_config = {
+        "web": {
+            "client_id": os.getenv('GOOGLE_CLIENT_ID'),
+            "client_secret": os.getenv('GOOGLE_CLIENT_SECRET'),
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [url_for('oauth2callback', _external=True)],
+        }
+    }
+    flow = Flow.from_client_config(
+        client_config,
+        scopes=['https://www.googleapis.com/auth/gmail.send'],
+        redirect_uri=url_for('oauth2callback', _external=True),
+    )
+    auth_url, state = flow.authorization_url(
+        access_type='offline',
+        include_granted_scopes='true',
+        prompt='consent',
+    )
+    from flask import session
+    session['oauth_state'] = state
+    return redirect(auth_url)
+
+
+@app.route('/oauth2callback')
+def oauth2callback():
+    """Google redirects here after user approves — save token to DB."""
+    import json
+    from google_auth_oauthlib.flow import Flow
+    from flask import session
+
+    state = session.get('oauth_state')
+    client_config = {
+        "web": {
+            "client_id": os.getenv('GOOGLE_CLIENT_ID'),
+            "client_secret": os.getenv('GOOGLE_CLIENT_SECRET'),
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [url_for('oauth2callback', _external=True)],
+        }
+    }
+    flow = Flow.from_client_config(
+        client_config,
+        scopes=['https://www.googleapis.com/auth/gmail.send'],
+        state=state,
+        redirect_uri=url_for('oauth2callback', _external=True),
+    )
+    flow.fetch_token(authorization_response=request.url)
+    creds = flow.credentials
+
+    # Get email address from Google
+    from googleapiclient.discovery import build
+    service = build('oauth2', 'v2', credentials=creds)
+    user_info = service.userinfo().get().execute()
+    email = user_info.get('email', '')
+
+    # Save token to DB
+    token_data = {
+        'token': creds.token,
+        'refresh_token': creds.refresh_token,
+        'client_id': creds.client_id,
+        'client_secret': creds.client_secret,
+        'scopes': list(creds.scopes or []),
+    }
+
+    existing = EmailAccount.query.filter_by(email_address=email).first()
+    if existing:
+        existing.oauth_token = json.dumps(token_data)
+        existing.auth_type = 'oauth'
+    else:
+        acc = EmailAccount(
+            email_address=email,
+            app_password='',
+            auth_type='oauth',
+            oauth_token=json.dumps(token_data),
+        )
+        db.session.add(acc)
+    db.session.commit()
+    flash(f'Gmail account {email} connected via OAuth!', 'success')
+    return redirect(url_for('accounts'))
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
