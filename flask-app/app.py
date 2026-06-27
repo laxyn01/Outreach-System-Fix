@@ -1045,12 +1045,11 @@ def unsubscribe(lead_id):
 #   import json
 #   from google_auth_oauthlib.flow import Flow
 
+
 @app.route('/accounts/connect-gmail')
 def connect_gmail():
-    """Start OAuth flow — redirects user to Google login."""
-    import json
     from google_auth_oauthlib.flow import Flow
-
+    from flask import session
     client_config = {
         "web": {
             "client_id": os.getenv('GOOGLE_CLIENT_ID'),
@@ -1064,17 +1063,15 @@ def connect_gmail():
         client_config,
         scopes=['https://www.googleapis.com/auth/gmail.send'],
         redirect_uri=url_for('oauth2callback', _external=True),
-    ) 
-        
-       auth_url, state = flow.authorization_url(
-    access_type='offline',
-    include_granted_scopes='true',
-    prompt='consent',
-    code_challenge_method=None,
-) 
-    from flask import session
-    session['oauth_state'] = state
-    return redirect(auth_url)
+    )
+        auth_url, state = flow.authorization_url(
+        access_type='offline',
+        include_granted_scopes='true',
+        prompt='consent',
+        code_challenge_method=None,
+    )
+        session['oauth_state'] = state
+        return redirect(auth_url)
 
 
 @app.route('/oauth2callback')
