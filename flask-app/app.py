@@ -1097,7 +1097,7 @@ def oauth2callback():
         state=state,
         redirect_uri=url_for('oauth2callback', _external=True),
     )
-    flow.fetch_token(authorization_response=request.url)
+    flow.fetch_token(authorization_response=request.url, code_verifier=None)
     creds = flow.credentials
 
     # Get email address from Google
