@@ -1068,6 +1068,7 @@ def connect_gmail():
         access_type='offline',
         include_granted_scopes='true',
         prompt='consent',
+
     )
     session['oauth_state'] = state
     return redirect(auth_url)
@@ -1079,7 +1080,7 @@ def oauth2callback():
     import json
     from google_auth_oauthlib.flow import Flow
     from flask import session
-
+    os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
     state = session.get('oauth_state')
     client_config = {
         "web": {
