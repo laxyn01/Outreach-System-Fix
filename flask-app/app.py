@@ -1064,14 +1064,14 @@ def connect_gmail():
         scopes=['https://www.googleapis.com/auth/gmail.send'],
         redirect_uri=url_for('oauth2callback', _external=True),
     )
-        auth_url, state = flow.authorization_url(
-        access_type='offline',
-        include_granted_scopes='true',
-        prompt='consent',
-        code_challenge_method=None,
-    )
-        session['oauth_state'] = state
-        return redirect(auth_url)
+            auth_url, state = flow.authorization_url(
+            access_type='offline',
+            include_granted_scopes='true',
+            prompt='consent',
+            code_challenge_method=None,
+        )
+            session['oauth_state'] = state
+            return redirect(auth_url)
 
 
 @app.route('/oauth2callback')
