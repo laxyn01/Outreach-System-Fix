@@ -1091,13 +1091,16 @@ def oauth2callback():
             "redirect_uris": [url_for('oauth2callback', _external=True)],
         }
     }
+    import urllib.parse
+    parsed = urllib.parse.urlparse(request.url)
+    clean_url = urllib.parse.urlunparse(parsed._replace(scheme='https'))
     flow = Flow.from_client_config(
         client_config,
         scopes=['https://www.googleapis.com/auth/gmail.send'],
         state=state,
         redirect_uri=url_for('oauth2callback', _external=True),
     )
-    flow.fetch_token(authorization_response=request.url, code_verifier=None)
+    flow.fetch_token(authorization_response=clean_url)
     creds = flow.credentials
 
     # Get email address from Google
