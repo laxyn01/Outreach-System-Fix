@@ -1104,11 +1104,14 @@ def oauth2callback():
     creds = flow.credentials
 
     # Get email address from Google
-    from googleapiclient.discovery import build
-    service = build('oauth2', 'v2', credentials=creds)
-    user_info = service.userinfo().get().execute()
-    email = user_info.get('email', '')
-
+    import google.auth.transport.requests
+    creds.refresh(google.auth.transport.requests.Request())
+    import requests as req
+    r = req.get(
+        'https://www.googleapis.com/oauth2/v1/userinfo',
+         headers={'Authorization': f'Bearer {creds.token}'}
+)
+    email = r.json().get('email', '')
     # Save token to DB
     token_data = {
         'token': creds.token,
