@@ -13,7 +13,7 @@
       </div>
       <div class="form-group">
         <label class="form-label">App Password <span class="form-hint">Gmail 16-char</span></label>
-        <input type="password" name="app_password" class="form-control" required placeholder="xxxx xxxx xxxx xxxx">
+       <input type="password" name="app_password" class="form-control" placeholder="xxxx xxxx xxxx xxxx">
       </div>
       <div class="form-group">
         <label class="form-label">SMTP Host</label>
@@ -27,6 +27,9 @@
     <button type="submit" class="btn btn-primary btn-sm">
       <i class="fa-solid fa-floppy-disk"></i> Save Account
     </button>
+    <a href="{{ url_for('connect_gmail') }}" class="btn btn-secondary btn-sm" style="margin-top:10px;">
+  <i class="fa-brands fa-google"></i> Connect Gmail via OAuth
+</a>
   </form>
 </div>
 
@@ -42,7 +45,7 @@
       {% for acc in accounts %}
       <tr>
         <td class="font-medium">{{ acc.email_address }}</td>
-        <td class="text-gray text-sm">{{ acc.smtp_host }}:{{ acc.smtp_port }}</td>
+        {% if acc.auth_type == 'oauth' %}OAuth{% else %}{{ acc.smtp_host }}:{{ acc.smtp_port }}{% endif %}
         <td>
           <div style="display:flex;align-items:center;gap:8px;">
             <span>{{ acc.daily_sent_count }} / {{ settings.daily_limit_per_account }}</span>
