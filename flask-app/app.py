@@ -1061,7 +1061,10 @@ def connect_gmail():
     }
     flow = Flow.from_client_config(
         client_config,
-        scopes=['https://www.googleapis.com/auth/gmail.send'],
+        scopes=[
+       'https://www.googleapis.com/auth/gmail.send',
+       'https://www.googleapis.com/auth/userinfo.email',
+   ],
         redirect_uri=url_for('oauth2callback', _external=True),
     )
     auth_url, state = flow.authorization_url(
