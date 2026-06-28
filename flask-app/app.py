@@ -1111,9 +1111,9 @@ def oauth2callback():
          headers={'Authorization': f'Bearer {creds.token}'}
 )
     email = r.json().get('email', '')
-if not email:
-    flash(f'Debug: {r.json()}', 'error')
-    return redirect(url_for('accounts'))
+    if not email:
+        flash(f'Debug: {r.json()}', 'error')
+        return redirect(url_for('accounts'))
     # Save token to DB
     token_data = {
         'token': creds.token,
