@@ -1105,7 +1105,6 @@ def oauth2callback():
 
     # Get email address from Google
     import google.auth.transport.requests
-    creds.refresh(google.auth.transport.requests.Request())
     import requests as req
     r = req.get(
         'https://www.googleapis.com/oauth2/v1/userinfo',
