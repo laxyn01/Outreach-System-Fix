@@ -1099,30 +1099,30 @@ def oauth2callback():
     clean_url = urllib.parse.urlunparse(parsed._replace(scheme='https'))
     flow = Flow.from_client_config(
         client_config,
-        scopes=['https://www.googleapis.com/auth/gmail.send'],
+        scopes=[
+            'https://www.googleapis.com/auth/gmail.send',
+            'https://www.googleapis.com/auth/userinfo.email',
+        ],
         state=state,
         redirect_uri=url_for('oauth2callback', _external=True),
     )
     flow.fetch_token(authorization_response=clean_url)
     creds = flow.credentials
 
-    # Get email address from Google
-    import google.auth.transport.requests
-    creds.refresh(google.auth.transport.requests.Request())
-    flash(f'Token: {creds.token[:20] if creds.token else "NONE"}', 'error')
-    import requests as req
-    import google.auth.transport.requests
-   import urllib.request
-    req2 = urllib.request.Request(
-        'https://www.googleapis.com/oauth2/v1/userinfo',
-        headers={'Authorization': f'Bearer {creds.token}'}
+    # Get email address — decode straight from the ID token, no extra API call
+    from google.oauth2 import id_token as google_id_token
+    import google.auth.transport.requests as google_requests
+
+    id_info = google_id_token.verify_oauth2_token(
+        creds.id_token,
+        google_requests.Request(),
+        os.getenv('GOOGLE_CLIENT_ID')
     )
-    with urllib.request.urlopen(req2) as response:
-        user_data = json.loads(response.read())
-    email = user_data.get('email', '')
+    email = id_info.get('email', '')
     if not email:
-        flash(f'Debug: {user_data}', 'error')
+        flash(f'Debug: {id_info}', 'error')
         return redirect(url_for('accounts'))
+
     token_data = {
         'token': creds.token,
         'refresh_token': creds.refresh_token,
@@ -1146,7 +1146,6 @@ def oauth2callback():
     db.session.commit()
     flash(f'Gmail account {email} connected via OAuth!', 'success')
     return redirect(url_for('accounts'))
-
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
