@@ -1105,6 +1105,8 @@ def oauth2callback():
 
     # Get email address from Google
     import google.auth.transport.requests
+    creds.refresh(google.auth.transport.requests.Request())
+    flash(f'Token: {creds.token[:20] if creds.token else "NONE"}', 'error')
     import requests as req
     import google.auth.transport.requests
     creds.refresh(google.auth.transport.requests.Request())
