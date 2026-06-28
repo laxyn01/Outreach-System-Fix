@@ -1113,8 +1113,8 @@ def oauth2callback():
 )
     email = r.json().get('email', '')
     if not email:
-    flash('Could not get email from Google.', 'error')
-    return redirect(url_for('accounts'))
+        flash('Could not get email from Google.', 'error')
+        return redirect(url_for('accounts'))
     # Save token to DB
     token_data = {
         'token': creds.token,
