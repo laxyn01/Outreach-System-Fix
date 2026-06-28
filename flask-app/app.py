@@ -1109,16 +1109,17 @@ def oauth2callback():
     flash(f'Token: {creds.token[:20] if creds.token else "NONE"}', 'error')
     import requests as req
     import google.auth.transport.requests
-    creds.refresh(google.auth.transport.requests.Request())
-    r = req.get(
+    import urllib.request
+    req2 = urllib.request.Request(
         'https://www.googleapis.com/oauth2/v1/userinfo',
-         headers={'Authorization': f'Bearer {creds.token}'}
-)
-    email = r.json().get('email', '')
+        headers={'Authorization': f'Bearer {creds.token}'}
+    )
+    with urllib.request.urlopen(req2) as response:
+        user_data = json.loads(response.read())
+    email = user_data.get('email', '')
     if not email:
-        flash(f'Debug: {r.json()}', 'error')
+        flash(f'Debug: {user_data}', 'error')
         return redirect(url_for('accounts'))
-    # Save token to DB
     token_data = {
         'token': creds.token,
         'refresh_token': creds.refresh_token,
