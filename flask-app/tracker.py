@@ -39,12 +39,12 @@ def wrap_links(html: str, lead_id: int, step: int, base_url: str) -> str:
     return re.sub(r'href="([^"]+)"', repl, html)
 
 
-def inject_tracking_pixel(html: str, lead_id: int, step: int, base_url: str) -> str:
+def inject_tracking_pixel(html: str, token: str, base_url: str) -> str:
     """Inject a 1x1 pixel at the very top of <body>.
-    Uses a clean /<lead_id>/<step>.gif path — no 'track'/'open' keywords to trip spam filters."""
+    Uses unique per-send token — no duplicate URLs for resent emails."""
     base_url = base_url.rstrip('/')
     pixel = (
-        f'<img src="{base_url}/r/{lead_id}/{step}.gif" '
+        f'<img src="{base_url}/r/{token}.gif" '
         f'width="1" height="1" style="display:block;width:1px;height:1px;border:0;" '
         f'alt="" border="0">'
     )
