@@ -2,6 +2,7 @@ import base64
 import json
 import random
 import smtplib
+import secrets
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -46,7 +47,7 @@ def _get_fresh_settings():
     return Settings.get_singleton()
 
 
-def prepare_content(subject_raw: str, body_raw: str, lead, settings, step: int, tracking_enabled: bool = True):
+def prepare_content(subject_raw: str, body_raw: str, lead, settings, step: int, tracking_enabled: bool = True, tracking_token: str = None):
     """Prepare email content from raw subject/body strings (spintax + placeholders)."""
     sender_name = (settings.sender_name or '').strip() or 'Your Name'
     video_link = settings.video_link_url or ''
@@ -63,7 +64,7 @@ def prepare_content(subject_raw: str, body_raw: str, lead, settings, step: int, 
     plain, html = ensure_html_wrapper(body, False)
     if html and tracking_enabled:
         html = wrap_links(html, lead.id, step, base_url)
-        html = inject_tracking_pixel(html, lead.id, step, base_url)
+        html = inject_tracking_pixel(html, tracking_token or f'{lead.id}-{step}', base_url)
 
     plain, html = append_unsubscribe(plain, html, lead.id, base_url)
     return subject, plain, html
@@ -236,7 +237,8 @@ def try_send_next_email() -> dict:
             body_raw = template.body
 
         tracking_on = campaign.tracking_enabled if campaign else True
-        subject, plain, html = prepare_content(subject_raw, body_raw, lead, settings, step, tracking_on)
+        tracking_token = secrets.token_hex(16) if tracking_on else None
+        subject, plain, html = prepare_content(subject_raw, body_raw, lead, settings, step, tracking_on, tracking_token)
         sender_name = (settings.sender_name or '').strip() or 'Your Name'
 
         try:
@@ -250,6 +252,7 @@ def try_send_next_email() -> dict:
                 lead_id=lead.id, account_used=account.email_address, step=step,
                 subject=subject, sent_at=now, log_type='campaign', status='sent',
                 lead_email=lead.email, lead_name=lead.full_name, campaign_id=cl.campaign_id,
+                tracking_token=tracking_token,
             )
             db.session.add(log)
             db.session.commit()
@@ -289,7 +292,8 @@ def try_send_next_email() -> dict:
         body_raw = template.body
 
     tracking_on = campaign.tracking_enabled if campaign else True
-    subject, plain, html = prepare_content(subject_raw, body_raw, lead, settings, step, tracking_on)
+    tracking_token = secrets.token_hex(16) if tracking_on else None
+    subject, plain, html = prepare_content(subject_raw, body_raw, lead, settings, step, tracking_on, tracking_token)
     sender_name = (settings.sender_name or '').strip() or 'Your Name'
 
     try:
@@ -303,6 +307,7 @@ def try_send_next_email() -> dict:
             subject=subject, sent_at=now, log_type='campaign', status='sent',
             lead_email=lead.email, lead_name=lead.full_name,
             campaign_id=lead.campaign_id,
+            tracking_token=tracking_token,
         )
         db.session.add(log)
         db.session.commit()
