@@ -949,12 +949,33 @@ def _gif_response():
     return resp
 
 
-@app.route('/r/<int:lead_id>/<int:step>.gif')
-def track_open_clean(lead_id, step):
-    """Clean tracking pixel URL — no 'track'/'open' keywords to trip spam filters."""
+def _mark_opened_by_token(token: str):
+    now_ts = datetime.utcnow()
+    log = EmailLog.query.filter_by(tracking_token=token).first()
+    if not log:
+        return
+    if not log.opened_at:
+        log.opened_at = now_ts
+    log.open_count = (log.open_count or 0) + 1
+    if log.lead_id:
+        cl = CampaignLead.query.filter_by(
+            campaign_id=log.campaign_id, lead_id=log.lead_id
+        ).first()
+        if cl and not cl.opened:
+            cl.opened = True
+            cl.opened_at = now_ts
+        lead = Lead.query.get(log.lead_id)
+        if lead and not lead.opened:
+            lead.opened = True
+            lead.opened_at = now_ts
+    db.session.commit()
+
+
+@app.route('/r/<token>.gif')
+def track_open_clean(token):
     resp = _gif_response()
     try:
-        _mark_opened(lead_id, step)
+        _mark_opened_by_token(token)
     except Exception:
         pass
     return resp
