@@ -268,9 +268,7 @@ def try_send_next_email() -> dict:
             return {'sent': 0, 'skipped': 1, 'errors': [f'{lead.email}: {str(e)}'], 'reason': 'send_failed'}
 
     # Fallback: legacy Lead.sequence_step path
-    lead = pick_next_lead(now)
-    if not lead:
-        return {'sent': 0, 'skipped': 1, 'errors': [], 'reason': 'no_lead'}
+    return {'sent': 0, 'skipped': 1, 'errors': [], 'reason': 'no_lead'}
 
     accounts = get_available_accounts(settings)
     account = pick_account(accounts, lead)
