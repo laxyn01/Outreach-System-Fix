@@ -265,6 +265,13 @@ def try_send_next_email() -> dict:
             )
             db.session.add(log)
             db.session.commit()
+            # Skip lead permanently after 3 failures
+            fail_count = EmailLog.query.filter_by(
+                lead_id=lead.id, step=step, status='failed'
+            ).count()
+            if fail_count >= 3:
+                cl.finished = True
+                db.session.commit()
             return {'sent': 0, 'skipped': 1, 'errors': [f'{lead.email}: {str(e)}'], 'reason': 'send_failed'}
 
     # Fallback: legacy Lead.sequence_step path
