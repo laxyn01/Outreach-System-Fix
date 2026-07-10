@@ -32,14 +32,35 @@ def is_within_send_window(settings: Settings, now_utc: datetime) -> bool:
 
 
 def pick_next_campaign_lead(now: datetime) -> 'CampaignLead | None':
-    """Return the next CampaignLead ready to be emailed.
+    from models import EmailLog
 
-    Filters:
-    - campaign must be active
-    - lead must not be globally unsubscribed, replied, or paused
-    - CampaignLead must not be finished or replied in this campaign
-    - next_send_at must be NULL (step 1 not yet sent) or <= now
-    """
+    # Pehle non-failed leads try karo
+    failed_lead_ids = db.session.query(EmailLog.lead_id).filter_by(
+        status='failed'
+    ).distinct().subquery()
+
+    result = (
+        CampaignLead.query
+        .join(Campaign, CampaignLead.campaign_id == Campaign.id)
+        .join(Lead, CampaignLead.lead_id == Lead.id)
+        .filter(
+            CampaignLead.finished.is_(False),
+            CampaignLead.replied.is_(False),
+            Campaign.status == 'active',
+            Lead.unsubscribed.is_(False),
+            Lead.replied.is_(False),
+            Lead.paused.is_(False),
+            or_(CampaignLead.next_send_at.is_(None), CampaignLead.next_send_at <= now),
+            Lead.id.notin_(failed_lead_ids),
+        )
+        .order_by(CampaignLead.id)
+        .first()
+    )
+
+    if result:
+        return result
+
+    # Saari normal leads khatam — ab failed leads retry karo
     return (
         CampaignLead.query
         .join(Campaign, CampaignLead.campaign_id == Campaign.id)
@@ -52,6 +73,7 @@ def pick_next_campaign_lead(now: datetime) -> 'CampaignLead | None':
             Lead.replied.is_(False),
             Lead.paused.is_(False),
             or_(CampaignLead.next_send_at.is_(None), CampaignLead.next_send_at <= now),
+            Lead.id.in_(failed_lead_ids),
         )
         .order_by(CampaignLead.id)
         .first()
