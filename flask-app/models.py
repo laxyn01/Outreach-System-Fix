@@ -87,6 +87,15 @@ class Campaign(db.Model):
         return round(replied / sent * 100, 1)
 
     @property
+    def failed_count(self):
+        from models import EmailLog
+        return EmailLog.query.filter_by(
+            campaign_id=self.id,
+            log_type='campaign',
+            status='failed'
+        ).count()
+
+    @property
     def click_rate(self):
         sent = self.sent_count
         if not sent:
