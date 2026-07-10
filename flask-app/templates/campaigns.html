@@ -21,6 +21,7 @@
         <th>Opens</th>
         <th>Clicks</th>
         <th>Replies</th>
+        <th>Failed</th>
         <th>Created</th>
         <th>Actions</th>
       </tr>
@@ -44,6 +45,7 @@
         <td>{{ c.open_rate }}%</td>
         <td>{{ c.click_rate }}%</td>
         <td>{{ c.reply_rate }}%</td>
+        <td>{{ c.failed_count }}</td>
         <td class="muted">{{ c.created_at.strftime('%b %d') if c.created_at else '—' }}</td>
         <td>
           <div class="row-actions">
