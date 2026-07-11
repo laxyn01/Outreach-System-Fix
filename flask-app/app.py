@@ -1167,6 +1167,22 @@ def oauth2callback():
     db.session.commit()
     flash(f'Gmail account {email} connected via OAuth!', 'success')
     return redirect(url_for('accounts'))
+@app.route('/upload-image', methods=['POST'])
+def upload_image():
+    import cloudinary
+    import cloudinary.uploader
+    cloudinary.config(
+        cloud_name=os.getenv('CLOUDINARY_CLOUD_NAME'),
+        api_key=os.getenv('CLOUDINARY_API_KEY'),
+        api_secret=os.getenv('CLOUDINARY_API_SECRET')
+    )
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file'}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'Empty filename'}), 400
+    result = cloudinary.uploader.upload(file, folder='outreacher')
+    return jsonify({'url': result['secure_url']})
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
