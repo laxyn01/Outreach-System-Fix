@@ -122,8 +122,7 @@ def pick_account(accounts: list, lead: Lead) -> 'EmailAccount | None':
         for acc in accounts:
             if acc.email_address == lead.assigned_account:
                 return acc
-    idx = lead.id % len(accounts)
-    return accounts[idx]
+    return min(accounts, key=lambda acc: acc.daily_sent_count)
 
 
 # ── Legacy pick_next_lead kept for backwards compat (not used by scheduler) ──
