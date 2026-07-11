@@ -561,12 +561,134 @@ function insertLink() {
 }
 
 function insertImage() {
-  const imgUrl = prompt('Image URL (thumbnail to display):');
-  if (!imgUrl) return;
-  const linkUrl = prompt('URL when image is clicked:', imgUrl);
-  if (linkUrl === null) return;
-  const snippet = `<a href="${linkUrl || imgUrl}"><img src="${imgUrl}" width="300" style="max-width:100%;border-radius:4px;display:block;" alt=""></a>`;
-  _insertAtCursor(snippet);
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:10px;padding:24px;width:440px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+      <div style="font-weight:600;font-size:15px;margin-bottom:16px;color:#111;">Insert Image / GIF</div>
+
+      <div style="margin-bottom:14px;">
+        <label style="font-size:12px;font-weight:600;color:#6b7280;display:block;margin-bottom:6px;">Upload from computer</label>
+        <div id="img-drop-zone" style="border:2px dashed #d1d5db;border-radius:8px;padding:20px;text-align:center;cursor:pointer;color:#9ca3af;font-size:13px;transition:border-color .2s;">
+          <div style="font-size:24px;margin-bottom:4px;">🖼</div>
+          <div>Drag & drop ya click karke select karo</div>
+          <div style="font-size:11px;margin-top:4px;">(JPG, PNG, GIF, WebP)</div>
+          <input type="file" id="img-file-input" accept="image/*,image/gif" style="display:none;">
+        </div>
+        <div id="img-preview" style="display:none;margin-top:8px;text-align:center;">
+          <img id="img-preview-el" style="max-height:120px;max-width:100%;border-radius:6px;border:1px solid #e5e7eb;">
+          <div id="img-upload-status" style="font-size:12px;color:#6b7280;margin-top:4px;"></div>
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+        <div style="flex:1;height:1px;background:#e5e7eb;"></div>
+        <span style="font-size:12px;color:#9ca3af;">ya URL se</span>
+        <div style="flex:1;height:1px;background:#e5e7eb;"></div>
+      </div>
+
+      <div style="margin-bottom:14px;">
+        <label style="font-size:12px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">Image URL</label>
+        <input type="text" id="img-url-input" placeholder="https://example.com/image.jpg" style="width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;box-sizing:border-box;">
+      </div>
+
+      <div style="margin-bottom:14px;">
+        <label style="font-size:12px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px;">Click pe kahan jaaye (optional)</label>
+        <input type="text" id="img-link-input" placeholder="https://youtube.com/watch?v=..." style="width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;box-sizing:border-box;">
+      </div>
+
+      <div style="margin-bottom:20px;">
+        <label style="font-size:12px;font-weight:600;color:#6b7280;display:block;margin-bottom:6px;">Size</label>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <button type="button" onclick="document.getElementById('img-size').value=200;setActiveSize(this)" style="flex:1;padding:6px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;cursor:pointer;background:#f9fafb;">Small</button>
+          <button type="button" onclick="document.getElementById('img-size').value=350;setActiveSize(this)" style="flex:1;padding:6px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;cursor:pointer;background:#2563eb;color:#fff;border-color:#2563eb;">Medium</button>
+          <button type="button" onclick="document.getElementById('img-size').value=500;setActiveSize(this)" style="flex:1;padding:6px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;cursor:pointer;background:#f9fafb;">Large</button>
+          <input type="number" id="img-size" value="350" min="50" max="800" style="width:70px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;text-align:center;">
+          <span style="font-size:12px;color:#9ca3af;">px</span>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button type="button" id="img-cancel-btn" style="padding:8px 18px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;cursor:pointer;font-size:13px;">Cancel</button>
+        <button type="button" id="img-insert-btn" style="padding:8px 18px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">Insert</button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(modal);
+
+  let uploadedUrl = '';
+
+  function setActiveSize(btn) {
+    modal.querySelectorAll('button[onclick*="img-size"]').forEach(b => {
+      b.style.background = '#f9fafb';
+      b.style.color = '#374151';
+      b.style.borderColor = '#e5e7eb';
+    });
+    btn.style.background = '#2563eb';
+    btn.style.color = '#fff';
+    btn.style.borderColor = '#2563eb';
+  }
+  window.setActiveSize = setActiveSize;
+
+  const dropZone = modal.querySelector('#img-drop-zone');
+  const fileInput = modal.querySelector('#img-file-input');
+
+  dropZone.addEventListener('click', () => fileInput.click());
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.style.borderColor = '#2563eb'; dropZone.style.background = '#eff6ff'; });
+  dropZone.addEventListener('dragleave', () => { dropZone.style.borderColor = '#d1d5db'; dropZone.style.background = ''; });
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.style.borderColor = '#d1d5db';
+    dropZone.style.background = '';
+    if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+  });
+  fileInput.addEventListener('change', () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
+
+  async function handleFile(file) {
+    const preview = modal.querySelector('#img-preview');
+    const previewEl = modal.querySelector('#img-preview-el');
+    const status = modal.querySelector('#img-upload-status');
+    previewEl.src = URL.createObjectURL(file);
+    preview.style.display = 'block';
+    status.textContent = 'Uploading...';
+    status.style.color = '#6b7280';
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const res = await fetch('/upload-image', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (data.url) {
+        uploadedUrl = data.url;
+        status.textContent = '✅ Upload ho gaya!';
+        status.style.color = '#16a34a';
+      } else {
+        status.textContent = '❌ Upload fail — ' + (data.error || 'try again');
+        status.style.color = '#dc2626';
+      }
+    } catch(e) {
+      status.textContent = '❌ Upload fail — ' + e.message;
+      status.style.color = '#dc2626';
+    }
+  }
+
+  modal.querySelector('#img-cancel-btn').onclick = () => modal.remove();
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+
+  modal.querySelector('#img-insert-btn').onclick = () => {
+    const urlInput = modal.querySelector('#img-url-input').value.trim();
+    const linkUrl = modal.querySelector('#img-link-input').value.trim();
+    const size = modal.querySelector('#img-size').value || 350;
+    const finalUrl = uploadedUrl || urlInput;
+    if (!finalUrl) { alert('Image upload karo ya URL daalo.'); return; }
+    let snippet;
+    if (linkUrl) {
+      snippet = `<a href="${linkUrl}" target="_blank" style="display:inline-block;"><img src="${finalUrl}" width="${size}" style="max-width:100%;border-radius:4px;display:block;" alt=""></a>`;
+    } else {
+      snippet = `<img src="${finalUrl}" width="${size}" style="max-width:100%;border-radius:4px;display:block;" alt="">`;
+    }
+    _insertAtCursor(snippet);
+    modal.remove();
+  };
 }
 
 function insertPlaceholder(ph) {
