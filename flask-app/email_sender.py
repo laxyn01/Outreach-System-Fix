@@ -3,6 +3,7 @@ import json
 import random
 import smtplib
 import secrets
+import re
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -61,7 +62,8 @@ def prepare_content(subject_raw: str, body_raw: str, lead, settings, step: int, 
     subject = replace_placeholders(subject, lead, sender_name, video_link)
     body = replace_placeholders(body, lead, sender_name, video_link)
 
-    plain, html = ensure_html_wrapper(body, False)
+    has_html_tags = bool(re.search(r'<[a-z][\s\S]*>', body, re.IGNORECASE))
+    plain, html = ensure_html_wrapper(body, has_html_tags)
     if html and tracking_enabled:
         html = wrap_links(html, lead.id, step, base_url)
         html = inject_tracking_pixel(html, tracking_token or f'{lead.id}-{step}', base_url)
