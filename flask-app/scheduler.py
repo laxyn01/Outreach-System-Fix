@@ -10,10 +10,14 @@ def start_scheduler(app):
     def send_job():
         with app.app_context():
             try:
-                try_send_next_email()
+                result = try_send_next_email()
+                print(f'[SCHEDULER] send_job result: {result}', flush=True)
+            except Exception as e:
+                print(f'[SCHEDULER] send_job ERROR: {e}', flush=True)
+            try:
                 try_send_warmup_email()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f'[SCHEDULER] warmup_job ERROR: {e}', flush=True)
 
     def reply_job():
         with app.app_context():
