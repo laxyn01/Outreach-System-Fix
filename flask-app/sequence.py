@@ -95,7 +95,7 @@ def advance_campaign_lead_step(cl: 'CampaignLead', now: datetime, steps: list):
     else:
         # wait_days from the NEXT step's definition
         next_step_data = steps[cl.sequence_step] if cl.sequence_step < len(steps) else {}
-        wait_days = max(1, int(next_step_data.get('wait_days', 3)))
+        wait_days = max(0, int(next_step_data.get('wait_days', 3)))
         cl.next_send_at = now + timedelta(days=wait_days)
 
 
