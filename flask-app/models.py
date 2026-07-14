@@ -330,7 +330,7 @@ def _run_migrations():
                 conn.execute(db.text(sql))
                 conn.commit()
             except Exception:
-                pass
+                conn.rollback()
 
 
 def _backfill_campaign_leads():
