@@ -260,8 +260,21 @@ def try_send_next_email() -> dict:
         subject, plain, html = prepare_content(subject_raw, body_raw, lead, settings, step, tracking_on, tracking_token)
         sender_name = (settings.sender_name or '').strip() or 'Your Name'
 
+        # Fetch previous step's Message-ID for threading
+        in_reply_to = None
+        references = None
+        if step > 1:
+            prev_log = EmailLog.query.filter_by(
+                lead_id=lead.id, campaign_id=cl.campaign_id, step=step - 1
+            ).order_by(EmailLog.sent_at.desc()).first()
+            if prev_log and prev_log.message_id:
+                in_reply_to = prev_log.message_id
+                references = prev_log.message_id
+                if not subject.lower().startswith('re:'):
+                    subject = f'Re: {subject}'
+
         try:
-            _send_email(account, lead.email, subject, plain, html, sender_name)
+            new_message_id = _send_email(account, lead.email, subject, plain, html, sender_name, in_reply_to, references)
             advance_campaign_lead_step(cl, now, steps)
             cl.assigned_account = account.email_address
             lead.assigned_account = account.email_address
@@ -271,27 +284,11 @@ def try_send_next_email() -> dict:
                 lead_id=lead.id, account_used=account.email_address, step=step,
                 subject=subject, sent_at=now, log_type='campaign', status='sent',
                 lead_email=lead.email, lead_name=lead.full_name, campaign_id=cl.campaign_id,
-                tracking_token=tracking_token,
+                tracking_token=tracking_token, message_id=new_message_id,
             )
             db.session.add(log)
             db.session.commit()
             return {'sent': 1, 'skipped': 0, 'errors': [], 'lead': lead.email, 'step': step, 'account': account.email_address}
-        except Exception as e:
-            log = EmailLog(
-                lead_id=lead.id, account_used=account.email_address, step=step,
-                subject=subject, sent_at=now, log_type='campaign', status='failed',
-                lead_email=lead.email, lead_name=lead.full_name, campaign_id=cl.campaign_id,
-            )
-            db.session.add(log)
-            db.session.commit()
-            # Skip lead permanently after 3 failures
-            fail_count = EmailLog.query.filter_by(
-                lead_id=lead.id, step=step, status='failed'
-            ).count()
-            if fail_count >= 3:
-                cl.finished = True
-                db.session.commit()
-            return {'sent': 0, 'skipped': 1, 'errors': [f'{lead.email}: {str(e)}'], 'reason': 'send_failed'}
 
     # Fallback: legacy Lead.sequence_step path
     return {'sent': 0, 'skipped': 1, 'errors': [], 'reason': 'no_lead'}
