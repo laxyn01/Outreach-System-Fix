@@ -289,6 +289,21 @@ def try_send_next_email() -> dict:
             db.session.add(log)
             db.session.commit()
             return {'sent': 1, 'skipped': 0, 'errors': [], 'lead': lead.email, 'step': step, 'account': account.email_address}
+        except Exception as e:
+            log = EmailLog(
+                lead_id=lead.id, account_used=account.email_address, step=step,
+                subject=subject, sent_at=now, log_type='campaign', status='failed',
+                lead_email=lead.email, lead_name=lead.full_name, campaign_id=cl.campaign_id,
+            )
+            db.session.add(log)
+            db.session.commit()
+            fail_count = EmailLog.query.filter_by(
+                lead_id=lead.id, step=step, status='failed'
+            ).count()
+            if fail_count >= 3:
+                cl.finished = True
+                db.session.commit()
+            return {'sent': 0, 'skipped': 1, 'errors': [f'{lead.email}: {str(e)}'], 'reason': 'send_failed'}
 
     # Fallback: legacy Lead.sequence_step path
     return {'sent': 0, 'skipped': 1, 'errors': [], 'reason': 'no_lead'}
