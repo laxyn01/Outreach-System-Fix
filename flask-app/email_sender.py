@@ -161,21 +161,16 @@ def send_gmail_api(account: EmailAccount, to_email: str, subject: str, plain: st
 
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
     body = {'raw': raw}
-    if in_reply_to:
-        thread_log = EmailLog.query.filter_by(message_id=in_reply_to).first()
-        if thread_log and getattr(thread_log, 'gmail_thread_id', None):
-            body['threadId'] = thread_log.gmail_thread_id
 
     sent = service.users().messages().send(userId='me', body=body).execute()
-    return new_message_id, sent.get('threadId')
+    return new_message_id
 
-
-def _send_email(account: EmailAccount, to_email: str, subject: str, plain: str, html: str, sender_name: str = ''):
+def _send_email(account: EmailAccount, to_email: str, subject: str, plain: str, html: str, sender_name: str = '', in_reply_to: str = None, references: str = None):
     """Smart dispatcher — uses OAuth if available, falls back to SMTP."""
     if account.auth_type == 'oauth' and account.oauth_token:
-        send_gmail_api(account, to_email, subject, plain, html, sender_name)
+        return send_gmail_api(account, to_email, subject, plain, html, sender_name, in_reply_to, references)
     else:
-        send_smtp(account, to_email, subject, plain, html, sender_name)
+        return send_smtp(account, to_email, subject, plain, html, sender_name, in_reply_to, references)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
