@@ -270,8 +270,12 @@ def try_send_next_email() -> dict:
             if prev_log and prev_log.message_id:
                 in_reply_to = prev_log.message_id
                 references = prev_log.message_id
-                if not subject.lower().startswith('re:'):
-                    subject = f'Re: {subject}'
+                # Reuse the ORIGINAL thread's subject so Gmail groups it
+                orig_subject = prev_log.subject or subject
+                if orig_subject.lower().startswith('re:'):
+                    subject = orig_subject
+                else:
+                    subject = f'Re: {orig_subject}'
 
         try:
             new_message_id = _send_email(account, lead.email, subject, plain, html, sender_name, in_reply_to, references)
