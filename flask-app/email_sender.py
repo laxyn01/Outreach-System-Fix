@@ -3,6 +3,7 @@ import json
 import random
 import smtplib
 import secrets
+import uuid
 import re
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
@@ -77,7 +78,7 @@ def prepare_template_content(template, lead, settings, step: int):
     return prepare_content(template.subject, template.body, lead, settings, step)
 
 
-def send_smtp(account: EmailAccount, to_email: str, subject: str, plain: str, html: str, sender_name: str = ''):
+def send_smtp(account: EmailAccount, to_email: str, subject: str, plain: str, html: str, sender_name: str = '', in_reply_to: str = None, references: str = None):
     msg = MIMEMultipart('alternative')
     msg['Subject'] = subject
     display = (sender_name or '').strip() or account.email_address
@@ -87,6 +88,13 @@ def send_smtp(account: EmailAccount, to_email: str, subject: str, plain: str, ht
     msg['X-Priority'] = '3'
     msg['Importance'] = 'Normal'
     msg['Precedence'] = 'bulk'
+
+    new_message_id = f'<{uuid.uuid4()}@{account.email_address.split("@")[-1]}>'
+    msg['Message-ID'] = new_message_id
+
+    if in_reply_to:
+        msg['In-Reply-To'] = in_reply_to
+        msg['References'] = references or in_reply_to
 
     if plain:
         msg.attach(MIMEText(plain, 'plain', 'utf-8'))
@@ -100,10 +108,12 @@ def send_smtp(account: EmailAccount, to_email: str, subject: str, plain: str, ht
         server.login(account.email_address, account.app_password)
         server.sendmail(account.email_address, to_email, msg.as_string())
 
+    return new_message_id
+
 
 # ── NEW: Gmail API sender ─────────────────────────────────────────────────────
 
-def send_gmail_api(account: EmailAccount, to_email: str, subject: str, plain: str, html: str, sender_name: str = ''):
+def send_gmail_api(account: EmailAccount, to_email: str, subject: str, plain: str, html: str, sender_name: str = '', in_reply_to: str = None, references: str = None):
     """Send email via Gmail API using stored OAuth token."""
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
@@ -119,10 +129,8 @@ def send_gmail_api(account: EmailAccount, to_email: str, subject: str, plain: st
         scopes=token_data.get('scopes'),
     )
 
-    # Auto-refresh if expired
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
-        # Save refreshed token back to DB
         token_data['token'] = creds.token
         account.oauth_token = json.dumps(token_data)
         db.session.commit()
@@ -139,13 +147,27 @@ def send_gmail_api(account: EmailAccount, to_email: str, subject: str, plain: st
     msg['Importance'] = 'Normal'
     msg['Precedence'] = 'bulk'
 
+    new_message_id = f'<{uuid.uuid4()}@{account.email_address.split("@")[-1]}>'
+    msg['Message-ID'] = new_message_id
+
+    if in_reply_to:
+        msg['In-Reply-To'] = in_reply_to
+        msg['References'] = references or in_reply_to
+
     if plain:
         msg.attach(MIMEText(plain, 'plain', 'utf-8'))
     if html:
         msg.attach(MIMEText(html, 'html', 'utf-8'))
 
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
-    service.users().messages().send(userId='me', body={'raw': raw}).execute()
+    body = {'raw': raw}
+    if in_reply_to:
+        thread_log = EmailLog.query.filter_by(message_id=in_reply_to).first()
+        if thread_log and getattr(thread_log, 'gmail_thread_id', None):
+            body['threadId'] = thread_log.gmail_thread_id
+
+    sent = service.users().messages().send(userId='me', body=body).execute()
+    return new_message_id, sent.get('threadId')
 
 
 def _send_email(account: EmailAccount, to_email: str, subject: str, plain: str, html: str, sender_name: str = ''):
