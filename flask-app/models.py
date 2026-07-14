@@ -250,6 +250,7 @@ class EmailLog(db.Model):
     lead_name = db.Column(db.String(255))
     campaign_id = db.Column(db.Integer, db.ForeignKey('campaigns.id'), nullable=True)
     tracking_token = db.Column(db.String(64), index=True)
+    message_id = db.Column(db.String(255))
 
     lead = db.relationship('Lead', backref='logs')
     campaign = db.relationship('Campaign', backref='logs')
@@ -321,6 +322,7 @@ def _run_migrations():
         "ALTER TABLE email_accounts ADD COLUMN auth_type TEXT DEFAULT 'smtp'",
         "ALTER TABLE email_accounts ADD COLUMN oauth_token TEXT DEFAULT NULL",
         "ALTER TABLE email_logs ADD COLUMN tracking_token TEXT",
+        "ALTER TABLE email_logs ADD COLUMN message_id TEXT",
     ]
     with db.engine.connect() as conn:
         for sql in migrations:
