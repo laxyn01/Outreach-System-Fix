@@ -165,8 +165,24 @@ def send_gmail_api(account: EmailAccount, to_email: str, subject: str, plain: st
         body['threadId'] = thread_id
 
     sent = service.users().messages().send(userId='me', body=body).execute()
-    return new_message_id, sent.get('threadId')
+    sent_id = sent.get('id')
+    gmail_thread_id = sent.get('threadId')
 
+    # Gmail overrides our Message-ID header — fetch the real one it assigned
+    actual_message_id = new_message_id
+    try:
+        full_msg = service.users().messages().get(
+            userId='me', id=sent_id, format='metadata', metadataHeaders=['Message-ID']
+        ).execute()
+        headers = full_msg.get('payload', {}).get('headers', [])
+        for h in headers:
+            if h.get('name', '').lower() == 'message-id':
+                actual_message_id = h.get('value')
+                break
+    except Exception:
+        pass
+
+    return actual_message_id, gmail_thread_id
 
 # ─────────────────────────────────────────────────────────────────────────────
 def _send_email(account: EmailAccount, to_email: str, subject: str, plain: str, html: str, sender_name: str = '', in_reply_to: str = None, references: str = None, thread_id: str = None):
