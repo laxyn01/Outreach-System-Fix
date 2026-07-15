@@ -108,12 +108,12 @@ def send_smtp(account: EmailAccount, to_email: str, subject: str, plain: str, ht
         server.login(account.email_address, account.app_password)
         server.sendmail(account.email_address, to_email, msg.as_string())
 
-    return new_message_id
+    return new_message_id, None
 
 
 # ── NEW: Gmail API sender ─────────────────────────────────────────────────────
 
-def send_gmail_api(account: EmailAccount, to_email: str, subject: str, plain: str, html: str, sender_name: str = '', in_reply_to: str = None, references: str = None):
+def send_gmail_api(account: EmailAccount, to_email: str, subject: str, plain: str, html: str, sender_name: str = '', in_reply_to: str = None, references: str = None, thread_id: str = None):
     """Send email via Gmail API using stored OAuth token."""
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
@@ -161,16 +161,11 @@ def send_gmail_api(account: EmailAccount, to_email: str, subject: str, plain: st
 
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
     body = {'raw': raw}
+    if thread_id:
+        body['threadId'] = thread_id
 
     sent = service.users().messages().send(userId='me', body=body).execute()
-    return new_message_id
-
-def _send_email(account: EmailAccount, to_email: str, subject: str, plain: str, html: str, sender_name: str = '', in_reply_to: str = None, references: str = None):
-    """Smart dispatcher — uses OAuth if available, falls back to SMTP."""
-    if account.auth_type == 'oauth' and account.oauth_token:
-        return send_gmail_api(account, to_email, subject, plain, html, sender_name, in_reply_to, references)
-    else:
-        return send_smtp(account, to_email, subject, plain, html, sender_name, in_reply_to, references)
+    return new_message_id, sent.get('threadId')
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -183,11 +178,12 @@ def send_test_email(account: EmailAccount) -> dict:
             f'Sent at {datetime.utcnow().isoformat()} UTC\n\n'
             f'If you see this, SMTP is working correctly.'
         )
-        _send_email(account, account.email_address, subject, plain, '', account.email_address)
-        return {'ok': True, 'message': 'Test email sent successfully.'}
-    except Exception as e:
-        return {'ok': False, 'message': str(e)}
-
+        def _send_email(account: EmailAccount, to_email: str, subject: str, plain: str, html: str, sender_name: str = '', in_reply_to: str = None, references: str = None, thread_id: str = None):
+    """Smart dispatcher — uses OAuth if available, falls back to SMTP."""
+    if account.auth_type == 'oauth' and account.oauth_token:
+        return send_gmail_api(account, to_email, subject, plain, html, sender_name, in_reply_to, references, thread_id)
+    else:
+        return send_smtp(account, to_email, subject, plain, html, sender_name, in_reply_to, references)
 
 def _pick_campaign_content(campaign: Campaign, step: int):
     if not campaign:
@@ -261,8 +257,10 @@ def try_send_next_email() -> dict:
         sender_name = (settings.sender_name or '').strip() or 'Your Name'
 
         # Fetch previous step's Message-ID for threading
+        # Fetch previous step's Message-ID for threading
         in_reply_to = None
         references = None
+        thread_id = None
         if step > 1:
             prev_log = EmailLog.query.filter_by(
                 lead_id=lead.id, campaign_id=cl.campaign_id, step=step - 1
@@ -270,6 +268,7 @@ def try_send_next_email() -> dict:
             if prev_log and prev_log.message_id:
                 in_reply_to = prev_log.message_id
                 references = prev_log.message_id
+                thread_id = prev_log.gmail_thread_id
                 # Reuse the ORIGINAL thread's subject so Gmail groups it
                 orig_subject = prev_log.subject or subject
                 if orig_subject.lower().startswith('re:'):
@@ -278,7 +277,7 @@ def try_send_next_email() -> dict:
                     subject = f'Re: {orig_subject}'
 
         try:
-            new_message_id = _send_email(account, lead.email, subject, plain, html, sender_name, in_reply_to, references)
+            new_message_id, new_thread_id = _send_email(account, lead.email, subject, plain, html, sender_name, in_reply_to, references, thread_id)
             advance_campaign_lead_step(cl, now, steps)
             cl.assigned_account = account.email_address
             lead.assigned_account = account.email_address
@@ -288,7 +287,7 @@ def try_send_next_email() -> dict:
                 lead_id=lead.id, account_used=account.email_address, step=step,
                 subject=subject, sent_at=now, log_type='campaign', status='sent',
                 lead_email=lead.email, lead_name=lead.full_name, campaign_id=cl.campaign_id,
-                tracking_token=tracking_token, message_id=new_message_id,
+                tracking_token=tracking_token, message_id=new_message_id, gmail_thread_id=new_thread_id,
             )
             db.session.add(log)
             db.session.commit()
