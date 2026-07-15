@@ -70,11 +70,16 @@ def append_unsubscribe(body_text: str, body_html: str, lead_id: int, base_url: s
 
 def ensure_html_wrapper(body: str, is_html: bool) -> tuple:
     if is_html:
+        # Build a readable plain-text fallback from the HTML body
+        plain = re.sub(r'<img[^>]*>', '[Image]', body, flags=re.IGNORECASE)
+        plain = re.sub(r'<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>', r'\2 (\1)', plain, flags=re.IGNORECASE | re.DOTALL)
+        plain = re.sub(r'<br\s*/?>', '\n', plain, flags=re.IGNORECASE)
+        plain = re.sub(r'<[^>]+>', '', plain).strip()
+
         if '<html' not in body.lower():
-            # Bug fix #3: preserve newlines by converting to <br>, don't strip
             body_html = body.replace('\n', '<br>\n')
             body = f'<html><body style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#333;">{body_html}</body></html>'
-        return '', body
+        return plain, body
     # Plain text: keep as-is, also create HTML version preserving whitespace
     plain = body
     body_escaped = body.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
