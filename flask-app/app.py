@@ -1084,6 +1084,7 @@ def connect_gmail():
         client_config,
         scopes=[
        'https://www.googleapis.com/auth/gmail.send',
+       'https://www.googleapis.com/auth/gmail.readonly',     
        'https://www.googleapis.com/auth/userinfo.email',
    ],
         redirect_uri=url_for('oauth2callback', _external=True),
@@ -1122,6 +1123,7 @@ def oauth2callback():
         client_config,
         scopes=[
             'https://www.googleapis.com/auth/gmail.send',
+            'https://www.googleapis.com/auth/gmail.readonly',
             'https://www.googleapis.com/auth/userinfo.email',
         ],
         state=state,
