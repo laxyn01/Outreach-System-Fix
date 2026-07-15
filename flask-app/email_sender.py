@@ -183,6 +183,9 @@ def send_gmail_api(account: EmailAccount, to_email: str, subject: str, plain: st
     except Exception as e:
         print(f'[GMAIL] Failed to fetch real Message-ID: {e}', flush=True)
 
+    return actual_message_id, gmail_thread_id
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 def _send_email(account: EmailAccount, to_email: str, subject: str, plain: str, html: str, sender_name: str = '', in_reply_to: str = None, references: str = None, thread_id: str = None):
     """Smart dispatcher — uses OAuth if available, falls back to SMTP."""
