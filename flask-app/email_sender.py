@@ -169,6 +169,13 @@ def send_gmail_api(account: EmailAccount, to_email: str, subject: str, plain: st
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+def _send_email(account: EmailAccount, to_email: str, subject: str, plain: str, html: str, sender_name: str = '', in_reply_to: str = None, references: str = None, thread_id: str = None):
+    """Smart dispatcher — uses OAuth if available, falls back to SMTP."""
+    if account.auth_type == 'oauth' and account.oauth_token:
+        return send_gmail_api(account, to_email, subject, plain, html, sender_name, in_reply_to, references, thread_id)
+    else:
+        return send_smtp(account, to_email, subject, plain, html, sender_name, in_reply_to, references)
+
 
 def send_test_email(account: EmailAccount) -> dict:
     try:
@@ -178,13 +185,11 @@ def send_test_email(account: EmailAccount) -> dict:
             f'Sent at {datetime.utcnow().isoformat()} UTC\n\n'
             f'If you see this, SMTP is working correctly.'
         )
-        def _send_email(account: EmailAccount, to_email: str, subject: str, plain: str, html: str, sender_name: str = '', in_reply_to: str = None, references: str = None, thread_id: str = None):
-    """Smart dispatcher — uses OAuth if available, falls back to SMTP."""
-    if account.auth_type == 'oauth' and account.oauth_token:
-        return send_gmail_api(account, to_email, subject, plain, html, sender_name, in_reply_to, references, thread_id)
-    else:
-        return send_smtp(account, to_email, subject, plain, html, sender_name, in_reply_to, references)
-
+        _send_email(account, account.email_address, subject, plain, '', account.email_address)
+        return {'ok': True, 'message': 'Test email sent successfully.'}
+    except Exception as e:
+        return {'ok': False, 'message': str(e)}
+        
 def _pick_campaign_content(campaign: Campaign, step: int):
     if not campaign:
         return None, None
