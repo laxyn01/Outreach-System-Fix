@@ -179,10 +179,9 @@ def send_gmail_api(account: EmailAccount, to_email: str, subject: str, plain: st
             if h.get('name', '').lower() == 'message-id':
                 actual_message_id = h.get('value')
                 break
-    except Exception:
-        pass
-
-    return actual_message_id, gmail_thread_id
+        print(f'[GMAIL] Fetched real Message-ID: {actual_message_id}', flush=True)
+    except Exception as e:
+        print(f'[GMAIL] Failed to fetch real Message-ID: {e}', flush=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
 def _send_email(account: EmailAccount, to_email: str, subject: str, plain: str, html: str, sender_name: str = '', in_reply_to: str = None, references: str = None, thread_id: str = None):
