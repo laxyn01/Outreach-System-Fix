@@ -76,6 +76,10 @@ with app.app_context():
 def ping():
     return 'OK'
 
+@app.route('/health')
+def health():
+    db.session.execute(db.text('SELECT 1'))
+    return {'status': 'ok'}, 200
 
 @app.context_processor
 def inject_globals():
