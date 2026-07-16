@@ -79,12 +79,14 @@ def prepare_template_content(template, lead, settings, step: int):
     """Legacy: prepare content from a Template model."""
     return prepare_content(template.subject, template.body, lead, settings, step)
 
-def _embed_images_as_attachments(msg: MIMEMultipart, html: str) -> str:
-    """Download image URLs in html and attach them inline via Content-ID,
-    so email clients show them as real attachments (not just remote links).
-    Falls back silently to the original URL if download fails."""
+def _build_html_part_with_images(html: str):
+    """Return a MIME part for the HTML alternative. If the HTML has Cloudinary
+    images, wraps them properly in multipart/related so clients show real
+    inline images. Falls back to plain MIMEText on any failure."""
     if not html:
-        return html
+        return MIMEText(html or '', 'html', 'utf-8')
+
+    images = []
 
     def repl(match):
         url = match.group(1)
@@ -95,12 +97,21 @@ def _embed_images_as_attachments(msg: MIMEMultipart, html: str) -> str:
             img_part = MIMEImage(resp.content)
             img_part.add_header('Content-ID', f'<{cid}>')
             img_part.add_header('Content-Disposition', 'inline')
-            msg.attach(img_part)
+            images.append(img_part)
             return f'src="cid:{cid}"'
         except Exception:
             return match.group(0)
 
-    return re.sub(r'src="(https://res\.cloudinary\.com/[^"]+)"', repl, html)
+    new_html = re.sub(r'src="(https://res\.cloudinary\.com/[^"]+)"', repl, html)
+
+    if not images:
+        return MIMEText(new_html, 'html', 'utf-8')
+
+    related = MIMEMultipart('related')
+    related.attach(MIMEText(new_html, 'html', 'utf-8'))
+    for img in images:
+        related.attach(img)
+    return related
 
 
 def send_smtp(account: EmailAccount, to_email: str, subject: str, plain: str, html: str, sender_name: str = '', in_reply_to: str = None, references: str = None):
@@ -123,9 +134,8 @@ def send_smtp(account: EmailAccount, to_email: str, subject: str, plain: str, ht
 
     if plain:
         msg.attach(MIMEText(plain, 'plain', 'utf-8'))
-    if html:
-        html = _embed_images_as_attachments(msg, html)
-        msg.attach(MIMEText(html, 'html', 'utf-8'))
+  if html:
+        msg.attach(_build_html_part_with_images(html))
 
     with smtplib.SMTP(account.smtp_host, account.smtp_port) as server:
         server.ehlo()
@@ -182,9 +192,8 @@ def send_gmail_api(account: EmailAccount, to_email: str, subject: str, plain: st
 
     if plain:
         msg.attach(MIMEText(plain, 'plain', 'utf-8'))
-    if html:
-        html = _embed_images_as_attachments(msg, html)
-        msg.attach(MIMEText(html, 'html', 'utf-8'))
+   if html:
+        msg.attach(_build_html_part_with_images(html))
         
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
     body = {'raw': raw}
