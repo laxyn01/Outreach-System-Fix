@@ -5,6 +5,8 @@ import smtplib
 import secrets
 import uuid
 import re
+import requests
+from email.mime.image import MIMEImage
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -77,6 +79,29 @@ def prepare_template_content(template, lead, settings, step: int):
     """Legacy: prepare content from a Template model."""
     return prepare_content(template.subject, template.body, lead, settings, step)
 
+def _embed_images_as_attachments(msg: MIMEMultipart, html: str) -> str:
+    """Download image URLs in html and attach them inline via Content-ID,
+    so email clients show them as real attachments (not just remote links).
+    Falls back silently to the original URL if download fails."""
+    if not html:
+        return html
+
+    def repl(match):
+        url = match.group(1)
+        try:
+            resp = requests.get(url, timeout=8)
+            resp.raise_for_status()
+            cid = uuid.uuid4().hex
+            img_part = MIMEImage(resp.content)
+            img_part.add_header('Content-ID', f'<{cid}>')
+            img_part.add_header('Content-Disposition', 'inline')
+            msg.attach(img_part)
+            return f'src="cid:{cid}"'
+        except Exception:
+            return match.group(0)
+
+    return re.sub(r'src="(https://res\.cloudinary\.com/[^"]+)"', repl, html)
+
 
 def send_smtp(account: EmailAccount, to_email: str, subject: str, plain: str, html: str, sender_name: str = '', in_reply_to: str = None, references: str = None):
     msg = MIMEMultipart('alternative')
@@ -99,6 +124,7 @@ def send_smtp(account: EmailAccount, to_email: str, subject: str, plain: str, ht
     if plain:
         msg.attach(MIMEText(plain, 'plain', 'utf-8'))
     if html:
+        html = _embed_images_as_attachments(msg, html)
         msg.attach(MIMEText(html, 'html', 'utf-8'))
 
     with smtplib.SMTP(account.smtp_host, account.smtp_port) as server:
@@ -157,8 +183,9 @@ def send_gmail_api(account: EmailAccount, to_email: str, subject: str, plain: st
     if plain:
         msg.attach(MIMEText(plain, 'plain', 'utf-8'))
     if html:
+        html = _embed_images_as_attachments(msg, html)
         msg.attach(MIMEText(html, 'html', 'utf-8'))
-
+        
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
     body = {'raw': raw}
     if thread_id:
