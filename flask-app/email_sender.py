@@ -192,7 +192,7 @@ def send_gmail_api(account: EmailAccount, to_email: str, subject: str, plain: st
 
     if plain:
         msg.attach(MIMEText(plain, 'plain', 'utf-8'))
-   if html:
+    if html:
         msg.attach(_build_html_part_with_images(html))
         
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
