@@ -134,7 +134,7 @@ def send_smtp(account: EmailAccount, to_email: str, subject: str, plain: str, ht
 
     if plain:
         msg.attach(MIMEText(plain, 'plain', 'utf-8'))
-  if html:
+    if html:
         msg.attach(_build_html_part_with_images(html))
 
     with smtplib.SMTP(account.smtp_host, account.smtp_port) as server:
