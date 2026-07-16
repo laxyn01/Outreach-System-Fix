@@ -79,6 +79,7 @@ def ensure_html_wrapper(body: str, is_html: bool) -> tuple:
         if '<html' not in body.lower():
             body_html = body.replace('\n', '<br>\n')
             body = f'<html><body style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#333;">{body_html}</body></html>'
+            print(f'[TRACKER] Generated plain: {plain[:200]}', flush=True)
         return plain, body
     # Plain text: keep as-is, also create HTML version preserving whitespace
     plain = body
