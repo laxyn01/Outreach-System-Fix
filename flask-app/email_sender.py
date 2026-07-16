@@ -94,9 +94,12 @@ def _build_html_part_with_images(html: str):
             resp = requests.get(url, timeout=8)
             resp.raise_for_status()
             cid = uuid.uuid4().hex
-            img_part = MIMEImage(resp.content)
+            content_type = resp.headers.get('Content-Type', 'image/jpeg').split(';')[0]
+            subtype = content_type.split('/')[-1] or 'jpeg'
+            ext = 'jpg' if subtype == 'jpeg' else subtype
+            img_part = MIMEImage(resp.content, _subtype=subtype)
             img_part.add_header('Content-ID', f'<{cid}>')
-            img_part.add_header('Content-Disposition', 'inline')
+            img_part.add_header('Content-Disposition', 'inline', filename=f'image.{ext}')
             images.append(img_part)
             return f'src="cid:{cid}"'
         except Exception:
