@@ -563,6 +563,8 @@ def leads_bulk_delete():
 @app.route('/leads/<int:lead_id>/delete', methods=['POST'])
 def lead_delete(lead_id):
     lead = Lead.query.get_or_404(lead_id)
+    CampaignLead.query.filter_by(lead_id=lead_id).delete(synchronize_session=False)
+    EmailLog.query.filter_by(lead_id=lead_id).delete(synchronize_session=False)
     db.session.delete(lead)
     db.session.commit()
     flash('Lead deleted.', 'success')
