@@ -717,10 +717,12 @@ def accounts():
         return redirect(url_for('accounts'))
 
     accounts_list = EmailAccount.query.order_by(EmailAccount.id).all()
+    for acc in accounts_list:
+        acc.reset_daily_if_needed()
+    db.session.commit()
     settings = Settings.get_singleton()
     return render_template('accounts.html', accounts=accounts_list, settings=settings)
-
-
+    
 @app.route('/accounts/<int:account_id>/delete', methods=['POST'])
 def account_delete(account_id):
     acc = EmailAccount.query.get_or_404(account_id)
