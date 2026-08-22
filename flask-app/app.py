@@ -397,7 +397,7 @@ def campaign_edit(campaign_id):
                 flash('Campaign renamed.', 'success')
             return redirect(url_for('campaign_edit', campaign_id=campaign_id, tab='analytics'))
 
-    analytics = _get_campaign_analytics(campaign_id)
+        analytics = _get_campaign_analytics(campaign_id)
     # Use CampaignLead rows — shows per-campaign step, not global Lead.sequence_step
     campaign_leads = (
         CampaignLead.query
@@ -413,6 +413,16 @@ def campaign_edit(campaign_id):
     weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
     active_days = [d.strip() for d in (campaign.campaign_active_days or '').split(',') if d.strip()]
 
+    from models import EmailLog as _EL
+    _logs = _EL.query.filter_by(campaign_id=campaign_id, log_type='campaign').all()
+    opened_map = {}
+    for log in _logs:
+        key = (log.lead_id, log.step)
+        if log.opened_at:
+            opened_map[key] = True
+        elif key not in opened_map:
+            opened_map[key] = False
+
     return render_template(
         'campaign_edit.html',
         campaign=campaign,
@@ -423,8 +433,8 @@ def campaign_edit(campaign_id):
         weekdays=weekdays,
         active_days=active_days,
         steps_json=campaign.steps_json or '[]',
+        opened_map=opened_map,
     )
-
 
 @app.route('/campaigns/<int:campaign_id>/preview-step', methods=['POST'])
 def campaign_preview_step(campaign_id):
