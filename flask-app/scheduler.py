@@ -28,5 +28,5 @@ def start_scheduler(app):
 
     if not scheduler.running:
         scheduler.add_job(send_job, 'interval', minutes=1, id='send_job', replace_existing=True)
-        scheduler.add_job(reply_job, 'cron', hour=9, id='reply_job', replace_existing=True)
+        scheduler.add_job(reply_job, 'interval', hours=4, id='reply_job', replace_existing=True)
         scheduler.start()
