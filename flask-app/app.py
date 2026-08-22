@@ -397,7 +397,7 @@ def campaign_edit(campaign_id):
                 flash('Campaign renamed.', 'success')
             return redirect(url_for('campaign_edit', campaign_id=campaign_id, tab='analytics'))
 
-        analytics = _get_campaign_analytics(campaign_id)
+    analytics = _get_campaign_analytics(campaign_id)
     # Use CampaignLead rows — shows per-campaign step, not global Lead.sequence_step
     campaign_leads = (
         CampaignLead.query
