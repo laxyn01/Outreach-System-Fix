@@ -159,7 +159,7 @@
   <div class="table-wrap">
     <table class="data-table">
       <thead>
-        <tr><th>Name</th><th>Email</th><th>Company</th><th>Step</th><th>Status</th><th>Opened</th><th>Last Sent</th></tr>
+        <tr><th>Name</th><th>Email</th><th>Company</th><th>Step</th><th>Status</th><th>FU1</th><th>FU2</th><th>FU3</th><th>FU4</th><th>Last Sent</th></tr>
       </thead>
       <tbody>
         {% for cl in campaign_leads %}
@@ -174,17 +174,24 @@
             {% set s = cl.status_label() %}
             <span class="badge badge-{{ s.lower() }}">{{ s }}</span>
           </td>
+                      {% for s in [1,2,3,4] %}
           <td>
-            {% if cl.opened %}
-              <span class="badge badge-green">Yes</span>
+            {% set key = (lead.id, s) if lead else None %}
+            {% if key and key in opened_map %}
+              {% if opened_map[key] %}
+                <span class="badge badge-green">Yes</span>
+              {% else %}
+                <span class="badge badge-gray">No</span>
+              {% endif %}
             {% else %}
               <span class="muted">—</span>
             {% endif %}
           </td>
+          {% endfor %}
           <td class="muted">{{ cl.last_sent_at|ist if cl.last_sent_at else '—' }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="7" class="empty-state"><p>No leads in this campaign yet.</p></td></tr>
+        <tr><td colspan="10" class="empty-state"><p>No leads in this campaign yet.</p></td></tr>
         {% endfor %}
       </tbody>
     </table>
