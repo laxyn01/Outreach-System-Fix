@@ -564,6 +564,8 @@ def leads_page():
 def leads_bulk_delete():
     ids = request.form.getlist('lead_ids')
     if ids:
+        CampaignLead.query.filter(CampaignLead.lead_id.in_(ids)).delete(synchronize_session=False)
+        EmailLog.query.filter(EmailLog.lead_id.in_(ids)).delete(synchronize_session=False)
         Lead.query.filter(Lead.id.in_(ids)).delete(synchronize_session=False)
         db.session.commit()
         flash(f'Deleted {len(ids)} leads.', 'success')
