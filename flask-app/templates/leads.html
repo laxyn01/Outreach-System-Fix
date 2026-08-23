@@ -28,80 +28,81 @@
   </form>
 </div>
 
-<form method="post" action="{{ url_for('leads_bulk_delete') }}" id="bulk-form">
-  <div class="table-toolbar">
-    <div style="display:flex;gap:8px;align-items:center;">
-      <button type="submit" class="btn btn-danger btn-sm" onclick="return confirmBulkDelete()">
-        <i class="fa-solid fa-trash"></i> Delete Selected
-      </button>
-      <span class="table-count">Showing {{ start }}–{{ end }} of {{ total }}</span>
-    </div>
-  </div>
+<!-- Hidden bulk-delete form — no longer wraps the table -->
+<form method="post" action="{{ url_for('leads_bulk_delete') }}" id="bulk-form"></form>
 
-  <div class="table-wrap">
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th style="width:36px;"><input type="checkbox" id="select-all" style="cursor:pointer;"></th>
-          <th>Name</th>
-          <th>Email</th>
-          <th>Company</th>
-          <th>Step</th>
-          <th>Status</th>
-          <th>Last Sent</th>
-          <th>Account</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for lead in leads %}
-        <tr>
-          <td><input type="checkbox" name="lead_ids" value="{{ lead.id }}" class="lead-cb" style="cursor:pointer;"></td>
-          <td class="font-medium">{{ lead.full_name }}</td>
-          <td class="text-gray">{{ lead.email }}</td>
-          <td class="text-gray">{{ lead.company or '—' }}</td>
-          <td>{{ lead.sequence_step }}/3</td>
-          <td><span class="badge badge-{{ lead.status_label().lower() }}">{{ lead.status_label() }}</span></td>
-          <td class="muted">{{ lead.last_sent_at.strftime('%b %d') if lead.last_sent_at else '—' }}</td>
-          <td class="muted" style="font-size:11px;">{{ lead.assigned_account or '—' }}</td>
-          <td>
-            <div class="row-actions">
-              {% if lead.paused %}
-              <form method="post" action="{{ url_for('lead_resume', lead_id=lead.id) }}" style="display:inline;">
-                <button type="submit" class="btn btn-xs btn-primary" title="Resume">
-                  <i class="fa-solid fa-play"></i>
-                </button>
-              </form>
-              {% else %}
-              <form method="post" action="{{ url_for('lead_pause', lead_id=lead.id) }}" style="display:inline;">
-                <button type="submit" class="btn btn-xs btn-secondary" title="Pause">
-                  <i class="fa-solid fa-pause"></i>
-                </button>
-              </form>
-              {% endif %}
-              <form method="post" action="{{ url_for('lead_delete', lead_id=lead.id) }}" style="display:inline;" onsubmit="return confirm('Delete this lead?')">
-                <button type="submit" class="btn btn-xs btn-danger" title="Delete">
-                  <i class="fa-solid fa-trash"></i>
-                </button>
-              </form>
-            </div>
-          </td>
-        </tr>
-        {% else %}
-        <tr>
-          <td colspan="9">
-            <div class="empty-state">
-              <div class="empty-icon">👤</div>
-              <p>No leads found{% if q or status != 'all' %} matching your filters{% endif %}.</p>
-              <a href="{{ url_for('upload') }}" class="btn btn-primary btn-sm">Upload Leads</a>
-            </div>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+<div class="table-toolbar">
+  <div style="display:flex;gap:8px;align-items:center;">
+    <button type="button" class="btn btn-danger btn-sm" onclick="confirmBulkDelete()">
+      <i class="fa-solid fa-trash"></i> Delete Selected
+    </button>
+    <span class="table-count">Showing {{ start }}–{{ end }} of {{ total }}</span>
   </div>
-</form>
+</div>
+
+<div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th style="width:36px;"><input type="checkbox" id="select-all" style="cursor:pointer;"></th>
+        <th>Name</th>
+        <th>Email</th>
+        <th>Company</th>
+        <th>Step</th>
+        <th>Status</th>
+        <th>Last Sent</th>
+        <th>Account</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for lead in leads %}
+      <tr>
+        <td><input type="checkbox" name="lead_ids" value="{{ lead.id }}" class="lead-cb" style="cursor:pointer;"></td>
+        <td class="font-medium">{{ lead.full_name }}</td>
+        <td class="text-gray">{{ lead.email }}</td>
+        <td class="text-gray">{{ lead.company or '—' }}</td>
+        <td>{{ lead.sequence_step }}/3</td>
+        <td><span class="badge badge-{{ lead.status_label().lower() }}">{{ lead.status_label() }}</span></td>
+        <td class="muted">{{ lead.last_sent_at.strftime('%b %d') if lead.last_sent_at else '—' }}</td>
+        <td class="muted" style="font-size:11px;">{{ lead.assigned_account or '—' }}</td>
+        <td>
+          <div class="row-actions">
+            {% if lead.paused %}
+            <form method="post" action="{{ url_for('lead_resume', lead_id=lead.id) }}" style="display:inline;">
+              <button type="submit" class="btn btn-xs btn-primary" title="Resume">
+                <i class="fa-solid fa-play"></i>
+              </button>
+            </form>
+            {% else %}
+            <form method="post" action="{{ url_for('lead_pause', lead_id=lead.id) }}" style="display:inline;">
+              <button type="submit" class="btn btn-xs btn-secondary" title="Pause">
+                <i class="fa-solid fa-pause"></i>
+              </button>
+            </form>
+            {% endif %}
+            <form method="post" action="{{ url_for('lead_delete', lead_id=lead.id) }}" style="display:inline;" onsubmit="return confirm('Delete this lead?')">
+              <button type="submit" class="btn btn-xs btn-danger" title="Delete">
+                <i class="fa-solid fa-trash"></i>
+              </button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="9">
+          <div class="empty-state">
+            <div class="empty-icon">👤</div>
+            <p>No leads found{% if q or status != 'all' %} matching your filters{% endif %}.</p>
+            <a href="{{ url_for('upload') }}" class="btn btn-primary btn-sm">Upload Leads</a>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 
 {% if pages > 1 %}
 <div class="pagination">
@@ -142,7 +143,17 @@ function confirmBulkDelete() {
 }
 
 document.getElementById('confirm-delete-btn').addEventListener('click', () => {
-  document.getElementById('bulk-form').submit();
+  // Dynamically add checked lead_ids as hidden inputs into the separate bulk-form, then submit
+  const bulkForm = document.getElementById('bulk-form');
+  bulkForm.querySelectorAll('input[name="lead_ids"]').forEach(el => el.remove());
+  document.querySelectorAll('.lead-cb:checked').forEach(cb => {
+    const hidden = document.createElement('input');
+    hidden.type = 'hidden';
+    hidden.name = 'lead_ids';
+    hidden.value = cb.value;
+    bulkForm.appendChild(hidden);
+  });
+  bulkForm.submit();
 });
 
 // Live search debounce
