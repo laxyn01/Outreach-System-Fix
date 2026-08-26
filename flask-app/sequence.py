@@ -107,11 +107,6 @@ def get_available_accounts(settings: Settings) -> list:
         acc.reset_daily_if_needed()
         if acc.daily_sent_count < limit:
             available.append(acc)
-    if not available and accounts:
-        for acc in accounts:
-            acc.daily_sent_count = 0
-        db.session.commit()
-        available = list(accounts)
     return available
 
 
