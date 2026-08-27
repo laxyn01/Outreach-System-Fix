@@ -417,11 +417,13 @@ def campaign_edit(campaign_id):
     _logs = _EL.query.filter_by(campaign_id=campaign_id, log_type='campaign').all()
     opened_map = {}
     for log in _logs:
-        key = (log.lead_id, log.step)
-        if log.opened_at:
-            opened_map[key] = True
-        elif key not in opened_map:
-            opened_map[key] = False
+    key = (log.lead_id, log.step)
+    count = log.open_count or 0
+    if key not in opened_map or (log.opened_at and not opened_map[key]['opened']):
+        opened_map[key] = {'opened': bool(log.opened_at), 'count': count}
+    elif log.opened_at:
+        # if multiple logs exist for same lead+step, keep the max count
+        opened_map[key]['count'] = max(opened_map[key]['count'], count)
 
     return render_template(
         'campaign_edit.html',
