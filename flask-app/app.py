@@ -311,6 +311,15 @@ def _get_campaign_analytics(campaign_id):
     click_rate = round(total_clicked / total_sent * 100, 1) if total_sent else 0
     reply_rate = round(total_replied / total_sent * 100, 1) if total_sent else 0
 
+    # NEW: per-step (FU1-4) stats
+    step_stats = {}
+    for step in [1, 2, 3, 4]:
+        step_logs = [l for l in logs if l.step == step]
+        step_sent = len(step_logs)
+        step_opened = sum(1 for l in step_logs if l.opened_at)
+        step_rate = round(step_opened / step_sent * 100, 1) if step_sent else 0
+        step_stats[f'FU{step}'] = {'sent': step_sent, 'opened': step_opened, 'rate': step_rate}
+
     from sqlalchemy import func
     daily = db.session.query(
         func.date(EmailLog.sent_at).label('day'),
@@ -324,6 +333,7 @@ def _get_campaign_analytics(campaign_id):
         'total_sent': total_sent, 'total_opened': total_opened,
         'total_clicked': total_clicked, 'total_replied': total_replied,
         'open_rate': open_rate, 'click_rate': click_rate, 'reply_rate': reply_rate,
+        'step_stats': step_stats,
         'chart_labels': json.dumps([str(r.day) for r in daily]),
         'chart_sent': json.dumps([int(r.sent or 0) for r in daily]),
         'chart_opened': json.dumps([int(r.opened or 0) for r in daily]),
