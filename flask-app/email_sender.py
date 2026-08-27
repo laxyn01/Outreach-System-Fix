@@ -356,7 +356,7 @@ def try_send_next_email() -> dict:
             db.session.add(log)
             db.session.commit()
             return {'sent': 1, 'skipped': 0, 'errors': [], 'lead': lead.email, 'step': step, 'account': account.email_address}
-                except Exception as e:
+        except Exception as e:
             error_str = str(e)
             log = EmailLog(
                 lead_id=lead.id, account_used=account.email_address, step=step,
