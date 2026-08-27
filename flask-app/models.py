@@ -330,6 +330,11 @@ def _run_migrations():
         "ALTER TABLE email_logs ADD COLUMN tracking_token TEXT",
         "ALTER TABLE email_logs ADD COLUMN message_id TEXT",
         "ALTER TABLE email_logs ADD COLUMN gmail_thread_id TEXT",
+        "ALTER TABLE email_logs ADD COLUMN error_message TEXT",
+        "ALTER TABLE email_accounts ADD COLUMN last_error TEXT",
+        "ALTER TABLE email_accounts ADD COLUMN last_error_at TIMESTAMP",
+        "ALTER TABLE email_accounts ADD COLUMN consecutive_failures INTEGER DEFAULT 0",
+        "ALTER TABLE email_accounts ADD COLUMN is_paused_auto BOOLEAN DEFAULT 0",
     ]
     with db.engine.connect() as conn:
         for sql in migrations:
