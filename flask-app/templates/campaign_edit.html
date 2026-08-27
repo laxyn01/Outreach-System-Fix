@@ -174,20 +174,20 @@
             {% set s = cl.status_label() %}
             <span class="badge badge-{{ s.lower() }}">{{ s }}</span>
           </td>
-                      {% for s in [1,2,3,4] %}
-          <td>
-            {% set key = (lead.id, s) if lead else None %}
-            {% if key and key in opened_map %}
-              {% if opened_map[key] %}
-                <span class="badge badge-green">Yes</span>
-              {% else %}
-                <span class="badge badge-gray">No</span>
-              {% endif %}
-            {% else %}
-              <span class="muted">—</span>
-            {% endif %}
-          </td>
-          {% endfor %}
+                     {% for s in [1,2,3,4] %}
+<td>
+  {% set key = (lead.id, s) if lead else None %}
+  {% if key and key in opened_map %}
+    {% if opened_map[key].opened %}
+      <span class="badge badge-green">Yes ({{ opened_map[key].count }}x)</span>
+    {% else %}
+      <span class="badge badge-gray">No</span>
+    {% endif %}
+  {% else %}
+    <span class="muted">—</span>
+  {% endif %}
+</td>
+{% endfor %}
           <td class="muted">{{ cl.last_sent_at|ist if cl.last_sent_at else '—' }}</td>
         </tr>
         {% else %}
