@@ -122,6 +122,20 @@
       <div class="stat-value">{{ analytics.reply_rate }}%</div>
       <div class="stat-sub">{{ analytics.total_replied }} replies</div>
     </div>
+    
+      <!-- NEW: Per-step open rate -->
+  <div class="card" style="margin-top:16px;">
+    <div class="card-title">Per-Step Open Rate</div>
+    <div class="stats-grid">
+      {% for step in ['FU1','FU2','FU3','FU4'] %}
+      <div class="stat-card">
+        <div class="stat-label"><span class="stat-dot dot-yellow"></span>{{ step }}</div>
+        <div class="stat-value">{{ analytics.step_stats[step].rate }}%</div>
+        <div class="stat-sub">{{ analytics.step_stats[step].opened }} / {{ analytics.step_stats[step].sent }} sent</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
   </div>
   {% if analytics.total_sent > 0 %}
   <div class="chart-wrap">
