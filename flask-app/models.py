@@ -210,6 +210,10 @@ class EmailAccount(db.Model):
     # ── NEW: OAuth support ──
     auth_type = db.Column(db.String(10), default='smtp')   # 'smtp' or 'oauth'
     oauth_token = db.Column(db.Text, default=None)          # JSON token from Google
+    last_error = db.Column(db.Text)
+    last_error_at = db.Column(db.DateTime)
+    consecutive_failures = db.Column(db.Integer, default=0)
+    is_paused_auto = db.Column(db.Boolean, default=False)
 
     def reset_daily_if_needed(self):
         today = datetime.utcnow().date()
@@ -252,6 +256,7 @@ class EmailLog(db.Model):
     tracking_token = db.Column(db.String(64), index=True)
     message_id = db.Column(db.String(255))
     gmail_thread_id = db.Column(db.String(255))
+    error_message = db.Column(db.Text)
 
     lead = db.relationship('Lead', backref='logs')
     campaign = db.relationship('Campaign', backref='logs')
