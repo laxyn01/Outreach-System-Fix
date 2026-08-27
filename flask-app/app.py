@@ -754,6 +754,16 @@ def account_delete(account_id):
     flash('Account deleted.', 'success')
     return redirect(url_for('accounts'))
 
+@app.route('/accounts/<int:account_id>/reset-health', methods=['POST'])
+def account_reset_health(account_id):
+    acc = EmailAccount.query.get_or_404(account_id)
+    acc.is_paused_auto = False
+    acc.consecutive_failures = 0
+    acc.last_error = None
+    acc.last_error_at = None
+    db.session.commit()
+    flash('Account health reset.', 'success')
+    return redirect(url_for('accounts'))
 
 @app.route('/accounts/<int:account_id>/test', methods=['POST'])
 def account_test(account_id):
