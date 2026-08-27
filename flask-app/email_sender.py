@@ -344,6 +344,8 @@ def try_send_next_email() -> dict:
             cl.assigned_account = account.email_address
             lead.assigned_account = account.email_address
             account.daily_sent_count += 1
+            account.consecutive_failures = 0
+            account.is_paused_auto = False
             settings.next_allowed_send_at = now + timedelta(seconds=random.randint(60, 120))
             log = EmailLog(
                 lead_id=lead.id, account_used=account.email_address, step=step,
@@ -354,13 +356,23 @@ def try_send_next_email() -> dict:
             db.session.add(log)
             db.session.commit()
             return {'sent': 1, 'skipped': 0, 'errors': [], 'lead': lead.email, 'step': step, 'account': account.email_address}
-        except Exception as e:
+                except Exception as e:
+            error_str = str(e)
             log = EmailLog(
                 lead_id=lead.id, account_used=account.email_address, step=step,
                 subject=subject, sent_at=now, log_type='campaign', status='failed',
                 lead_email=lead.email, lead_name=lead.full_name, campaign_id=cl.campaign_id,
+                error_message=error_str,
             )
             db.session.add(log)
+
+            account.last_error = error_str
+            account.last_error_at = now
+            account.consecutive_failures = (account.consecutive_failures or 0) + 1
+            hard_block_signals = ['limit', 'quota', 'suspend', 'disabled', 'blocked']
+            if any(sig in error_str.lower() for sig in hard_block_signals):
+                account.is_paused_auto = True
+
             db.session.commit()
             fail_count = EmailLog.query.filter_by(
                 lead_id=lead.id, step=step, status='failed'
@@ -368,7 +380,7 @@ def try_send_next_email() -> dict:
             if fail_count >= 3:
                 cl.finished = True
                 db.session.commit()
-            return {'sent': 0, 'skipped': 1, 'errors': [f'{lead.email}: {str(e)}'], 'reason': 'send_failed'}
+            return {'sent': 0, 'skipped': 1, 'errors': [f'{lead.email}: {error_str}'], 'reason': 'send_failed'}
 
     # Fallback: legacy Lead.sequence_step path
     return {'sent': 0, 'skipped': 1, 'errors': [], 'reason': 'no_lead'}
