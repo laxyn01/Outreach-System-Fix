@@ -249,19 +249,20 @@ def send_test_email(account: EmailAccount) -> dict:
         
 def _pick_campaign_content(campaign: Campaign, step: int):
     if not campaign:
-        return None, None
+        return None, None, 0
     steps = campaign.get_steps()
     if not steps:
-        return None, None
+        return None, None, 0
     step_idx = step - 1
     if step_idx < 0 or step_idx >= len(steps):
-        return None, None
+        return None, None, 0
     step_data = steps[step_idx]
     variants = step_data.get('variants', [])
     if not variants:
-        return None, None
-    variant = random.choice(variants)
-    return variant.get('subject', ''), variant.get('body', '')
+        return None, None, 0
+    variant_idx = random.randrange(len(variants))
+    variant = variants[variant_idx]
+    return variant.get('subject', ''), variant.get('body', ''), variant_idx
 
 
 def _pick_legacy_template(campaign: Campaign, step: int):
