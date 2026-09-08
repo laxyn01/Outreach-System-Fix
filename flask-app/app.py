@@ -314,6 +314,7 @@ def _get_campaign_analytics(campaign_id):
     # NEW: per-step (FU1-4) stats
     step_stats = {}
     variant_stats = {}
+    campaign = Campaign.query.get(campaign_id)
     campaign_steps = campaign.get_steps() if campaign else []
     for step in [1, 2, 3, 4]:
         step_logs = [l for l in logs if l.step == step]
