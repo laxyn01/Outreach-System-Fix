@@ -336,8 +336,13 @@ def _get_campaign_analytics(campaign_id):
             v_rate = round(v_opened / v_sent * 100, 1) if v_sent else 0
             label = chr(65 + v_idx)  # A, B, C...
             subject_preview = (v_meta.get('subject', '') or '')[:40]
+            body_preview = (v_meta.get('body', '') or '')
+            import re as _re
+            body_preview = _re.sub(r'<[^>]+>', ' ', body_preview)
+            body_preview = _re.sub(r'\s+', ' ', body_preview).strip()[:60]
             variant_rows.append({
                 'label': label, 'subject_preview': subject_preview,
+                'body_preview': body_preview,
                 'sent': v_sent, 'opened': v_opened, 'rate': v_rate,
             })
         if len(variant_rows) > 1:
