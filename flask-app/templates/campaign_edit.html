@@ -138,6 +138,36 @@
       </div>
   </div>
   </div>
+  {% if analytics.variant_stats %}
+  <div class="card" style="margin-top:16px;">
+    <div class="card-title">A/B Variant Performance</div>
+    {% for step_key, variants in analytics.variant_stats.items() %}
+    <div style="margin-bottom:16px;">
+      <div style="font-size:12px;font-weight:600;color:#6b7280;margin-bottom:8px;">{{ step_key }}</div>
+      <table class="data-table">
+        <thead>
+          <tr><th>Variant</th><th>Subject Preview</th><th>Sent</th><th>Opened</th><th>Open Rate</th></tr>
+        </thead>
+        <tbody>
+          {% for v in variants %}
+          <tr>
+            <td class="font-medium">{{ v.label }}</td>
+            <td class="text-gray">{{ v.subject_preview }}{% if v.subject_preview|length == 40 %}…{% endif %}</td>
+            <td>{{ v.sent }}</td>
+            <td>{{ v.opened }}</td>
+            <td>
+              <span class="badge {% if v.rate == (variants|map(attribute='rate')|max) and v.sent > 0 %}badge-green{% else %}badge-gray{% endif %}">
+                {{ v.rate }}%
+              </span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
   {% if analytics.total_sent > 0 %}
   <div class="chart-wrap">
     <div class="chart-title" style="margin-bottom:16px;">Activity Over Time</div>
