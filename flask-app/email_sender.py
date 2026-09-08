@@ -306,13 +306,14 @@ def try_send_next_email() -> dict:
                 'reason': 'no_account',
             }
 
-        subject_raw, body_raw = _pick_campaign_content(campaign, step)
+        subject_raw, body_raw, variant_idx = _pick_campaign_content(campaign, step)
         if subject_raw is None:
             template = _pick_legacy_template(campaign, step) or pick_template(step)
             if not template:
                 return {'sent': 0, 'skipped': 1, 'errors': [f'No template for step {step}'], 'reason': 'no_template'}
             subject_raw = template.subject
             body_raw = template.body
+            variant_idx = 0
 
         tracking_on = campaign.tracking_enabled if campaign else True
         tracking_token = secrets.token_hex(16) if tracking_on else None
@@ -353,6 +354,7 @@ def try_send_next_email() -> dict:
                 subject=subject, sent_at=now, log_type='campaign', status='sent',
                 lead_email=lead.email, lead_name=lead.full_name, campaign_id=cl.campaign_id,
                 tracking_token=tracking_token, message_id=new_message_id, gmail_thread_id=new_thread_id,
+                variant_index=variant_idx,
             )
             db.session.add(log)
             db.session.commit()
@@ -397,13 +399,14 @@ def try_send_next_email() -> dict:
 
     step = lead.sequence_step + 1
     campaign = Campaign.query.get(lead.campaign_id) if lead.campaign_id else None
-    subject_raw, body_raw = _pick_campaign_content(campaign, step)
+    subject_raw, body_raw, variant_idx = _pick_campaign_content(campaign, step)
     if subject_raw is None:
         template = (_pick_legacy_template(campaign, step) if campaign else None) or pick_template(step)
         if not template:
             return {'sent': 0, 'skipped': 1, 'errors': [f'No template for step {step}'], 'reason': 'no_template'}
         subject_raw = template.subject
         body_raw = template.body
+        variant_idx = 0
 
     tracking_on = campaign.tracking_enabled if campaign else True
     tracking_token = secrets.token_hex(16) if tracking_on else None
@@ -422,6 +425,7 @@ def try_send_next_email() -> dict:
             lead_email=lead.email, lead_name=lead.full_name,
             campaign_id=lead.campaign_id,
             tracking_token=tracking_token,
+            variant_index=variant_idx,
         )
         db.session.add(log)
         db.session.commit()
