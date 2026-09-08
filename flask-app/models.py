@@ -257,6 +257,7 @@ class EmailLog(db.Model):
     message_id = db.Column(db.String(255))
     gmail_thread_id = db.Column(db.String(255))
     error_message = db.Column(db.Text)
+    variant_index = db.Column(db.Integer, default=0)
 
     lead = db.relationship('Lead', backref='logs')
     campaign = db.relationship('Campaign', backref='logs')
@@ -335,6 +336,7 @@ def _run_migrations():
         "ALTER TABLE email_accounts ADD COLUMN last_error_at TIMESTAMP",
         "ALTER TABLE email_accounts ADD COLUMN consecutive_failures INTEGER DEFAULT 0",
         "ALTER TABLE email_accounts ADD COLUMN is_paused_auto BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE email_logs ADD COLUMN variant_index INTEGER DEFAULT 0",
     ]
     with db.engine.connect() as conn:
         for sql in migrations:
