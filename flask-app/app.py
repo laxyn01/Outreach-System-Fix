@@ -313,12 +313,34 @@ def _get_campaign_analytics(campaign_id):
 
     # NEW: per-step (FU1-4) stats
     step_stats = {}
+    variant_stats = {}
+    campaign_steps = campaign.get_steps() if campaign else []
     for step in [1, 2, 3, 4]:
         step_logs = [l for l in logs if l.step == step]
         step_sent = len(step_logs)
         step_opened = sum(1 for l in step_logs if l.opened_at)
         step_rate = round(step_opened / step_sent * 100, 1) if step_sent else 0
         step_stats[f'FU{step}'] = {'sent': step_sent, 'opened': step_opened, 'rate': step_rate}
+
+        # Variant-wise breakdown for this step
+        step_idx = step - 1
+        variants_meta = []
+        if step_idx < len(campaign_steps):
+            variants_meta = campaign_steps[step_idx].get('variants', [])
+        variant_rows = []
+        for v_idx, v_meta in enumerate(variants_meta):
+            v_logs = [l for l in step_logs if (l.variant_index or 0) == v_idx]
+            v_sent = len(v_logs)
+            v_opened = sum(1 for l in v_logs if l.opened_at)
+            v_rate = round(v_opened / v_sent * 100, 1) if v_sent else 0
+            label = chr(65 + v_idx)  # A, B, C...
+            subject_preview = (v_meta.get('subject', '') or '')[:40]
+            variant_rows.append({
+                'label': label, 'subject_preview': subject_preview,
+                'sent': v_sent, 'opened': v_opened, 'rate': v_rate,
+            })
+        if len(variant_rows) > 1:
+            variant_stats[f'FU{step}'] = variant_rows
 
     from sqlalchemy import func
     daily = db.session.query(
@@ -334,6 +356,7 @@ def _get_campaign_analytics(campaign_id):
         'total_clicked': total_clicked, 'total_replied': total_replied,
         'open_rate': open_rate, 'click_rate': click_rate, 'reply_rate': reply_rate,
         'step_stats': step_stats,
+        'variant_stats': variant_stats,
         'chart_labels': json.dumps([str(r.day) for r in daily]),
         'chart_sent': json.dumps([int(r.sent or 0) for r in daily]),
         'chart_opened': json.dumps([int(r.opened or 0) for r in daily]),
