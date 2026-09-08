@@ -146,13 +146,14 @@
       <div style="font-size:12px;font-weight:600;color:#6b7280;margin-bottom:8px;">{{ step_key }}</div>
       <table class="data-table">
         <thead>
-          <tr><th>Variant</th><th>Subject Preview</th><th>Sent</th><th>Opened</th><th>Open Rate</th></tr>
+          <tr><th>Variant</th><th>Subject Preview</th><th>Body Preview</th><th>Sent</th><th>Opened</th><th>Open Rate</th></tr>
         </thead>
         <tbody>
           {% for v in variants %}
           <tr>
             <td class="font-medium">{{ v.label }}</td>
             <td class="text-gray">{{ v.subject_preview }}{% if v.subject_preview|length == 40 %}…{% endif %}</td>
+            <td class="text-gray">{{ v.body_preview }}{% if v.body_preview|length == 60 %}…{% endif %}</td>
             <td>{{ v.sent }}</td>
             <td>{{ v.opened }}</td>
             <td>
