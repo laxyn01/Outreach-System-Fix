@@ -159,7 +159,7 @@ def check_replies_route():
 
 # ─── Campaigns ──────────────────────────────────────────────────────────────
 
-def _add_lead_to_campaign(email: str, first_name: str, last_name: str, company: str, campaign_id: int) -> bool:
+def _add_lead_to_campaign(email: str, first_name: str, last_name: str, company: str, campaign_id: int, icebreaker: str = '') -> bool:
     """Find or create a Lead, then create a fresh CampaignLead row for this campaign.
     Returns True if a new CampaignLead was created (i.e. lead not already enrolled)."""
     lead = Lead.query.filter_by(email=email).first()
@@ -170,9 +170,12 @@ def _add_lead_to_campaign(email: str, first_name: str, last_name: str, company: 
             email=email,
             company=company,
             campaign_id=campaign_id,
+            icebreaker=icebreaker,
         )
         db.session.add(lead)
         db.session.flush()
+    elif icebreaker:
+        lead.icebreaker = icebreaker
     # Always enroll a fresh CampaignLead — sequence_step starts at 0 regardless
     # of what other campaigns this lead has been in.
     existing = CampaignLead.query.filter_by(campaign_id=campaign_id, lead_id=lead.id).first()
@@ -676,6 +679,7 @@ def _parse_upload_file(file):
             'last_name': last.strip(),
             'email': email,
             'company': row.get('company', '').strip(),
+            'icebreaker': row.get('icebreaker', '').strip(),
         })
     return result
 
