@@ -234,6 +234,7 @@ def campaign_new():
                     last_name=row.get('last_name', ''),
                     company=row.get('company', ''),
                     campaign_id=campaign.id,
+                    icebreaker=row.get('icebreaker', ''),
                 )
                 if added:
                     imported += 1
@@ -424,6 +425,7 @@ def campaign_edit(campaign_id):
                         last_name=row.get('last_name', ''),
                         company=row.get('company', ''),
                         campaign_id=campaign_id,
+                        icebreaker=row.get('icebreaker', ''),
                     )
                     if added:
                         imported += 1
