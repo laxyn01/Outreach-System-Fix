@@ -18,6 +18,7 @@ def replace_placeholders(text: str, lead, sender_name: str, video_link: str = ''
         '[name]': first,
         '{video_link}': video_link or '',
         '{pitch}': getattr(lead, 'pitch_text', '') or '',
+        '{icebreaker}': getattr(lead, 'icebreaker', '') or '',
     }
     for key, val in replacements.items():
         text = text.replace(key, val)
