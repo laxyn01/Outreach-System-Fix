@@ -120,6 +120,7 @@ class Lead(db.Model):
     last_name = db.Column(db.String(120))
     email = db.Column(db.String(255), unique=True, nullable=False, index=True)
     company = db.Column(db.String(255))
+    icebreaker = db.Column(db.Text)
     sequence_step = db.Column(db.Integer, default=0)
     last_sent_at = db.Column(db.DateTime)
     next_send_at = db.Column(db.DateTime)
@@ -337,6 +338,7 @@ def _run_migrations():
         "ALTER TABLE email_accounts ADD COLUMN consecutive_failures INTEGER DEFAULT 0",
         "ALTER TABLE email_accounts ADD COLUMN is_paused_auto BOOLEAN DEFAULT FALSE",
         "ALTER TABLE email_logs ADD COLUMN variant_index INTEGER DEFAULT 0",
+        "ALTER TABLE leads ADD COLUMN icebreaker TEXT",
     ]
     with db.engine.connect() as conn:
         for sql in migrations:
