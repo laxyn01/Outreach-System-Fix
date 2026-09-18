@@ -380,7 +380,7 @@ def try_send_next_email() -> dict:
             fail_count = EmailLog.query.filter_by(
                 lead_id=lead.id, step=step, status='failed'
             ).count()
-            if fail_count >= 3:
+            if fail_count >= 4:
                 cl.finished = True
                 db.session.commit()
             return {'sent': 0, 'skipped': 1, 'errors': [f'{lead.email}: {error_str}'], 'reason': 'send_failed'}
