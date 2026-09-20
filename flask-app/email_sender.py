@@ -1,5 +1,6 @@
 import base64
 import json
+import os
 import random
 import smtplib
 import secrets
@@ -160,6 +161,9 @@ def _load_oauth_credentials(account: EmailAccount):
     send_gmail_api(); it was extracted verbatim so other modules (warmup.py)
     can reuse the exact same construction and refresh behaviour instead of
     duplicating it. send_gmail_api() now calls this and is otherwise unchanged.
+
+    Google-specific. Outlook accounts (account.provider == 'outlook') must
+    NOT be passed to this function — use _load_outlook_credentials() instead.
     """
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
@@ -181,6 +185,80 @@ def _load_oauth_credentials(account: EmailAccount):
         db.session.commit()
 
     return creds
+
+
+# ── NEW (OutreachCommand Outlook/Graph task): MSAL constants ──────────────────
+# Mirrors the same-named constants in app.py exactly (same env vars, same
+# defaults, same "common" authority reasoning — see the comment above
+# connect_outlook() in app.py for why "common" and not the GUID tenant or
+# "consumers"). Deliberately duplicated here rather than imported from app.py:
+# app.py does `from email_sender import ...` at module load time, so an
+# `from app import ...` here would be a circular import. Since these are
+# just constants (not state), duplication is simpler and safer than a lazy
+# in-function import of app.py.
+MS_CLIENT_ID = os.getenv('MS_CLIENT_ID', 'a5d4c56e-8e9c-4018-ba95-e6fe6020f791')
+MS_CLIENT_SECRET = os.getenv('MS_CLIENT_SECRET')
+MS_AUTHORITY = 'https://login.microsoftonline.com/common'
+MS_SCOPES = ['Mail.Send', 'Mail.ReadWrite', 'User.Read', 'offline_access']
+
+
+def _load_outlook_credentials(account: EmailAccount) -> str:
+    """Return a valid Graph API access token for an Outlook/Microsoft 365
+    personal account, refreshing via MSAL and persisting the new token set
+    if the cached one is expired or about to expire.
+
+    This is the Outlook-specific analogue of _load_oauth_credentials() above.
+    It is intentionally a SEPARATE function rather than a modification of
+    that one: the two providers store differently-shaped JSON in the same
+    oauth_token column (Google: token/refresh_token/client_id/client_secret/
+    scopes: MSAL result dict: access_token/refresh_token/expires_in/id_token
+    etc.), and google.oauth2.credentials.Credentials has no idea how to parse
+    an MSAL token dict. Callers MUST already know account.provider == 'outlook'
+    before calling this (see the dispatcher in _send_email below).
+
+    Returns the bearer access_token string (not a Credentials object) since
+    that's all send_outlook_graph() needs to call Graph's REST API directly.
+    """
+    import msal
+
+    token_data = json.loads(account.oauth_token)
+
+    msal_app = msal.ConfidentialClientApplication(
+        MS_CLIENT_ID,
+        authority=MS_AUTHORITY,
+        client_credential=MS_CLIENT_SECRET,
+    )
+
+    refresh_token = token_data.get('refresh_token')
+    result = None
+    if refresh_token:
+        # acquire_token_by_refresh_token handles the "still valid, just return
+        # a cached-equivalent token" case internally via MSAL's token cache
+        # semantics for a ConfidentialClientApplication built fresh each call,
+        # so we always go through it rather than hand-rolling an expires_on
+        # check — MSAL's own refresh endpoint call is the source of truth for
+        # whether Microsoft still considers the access token good.
+        result = msal_app.acquire_token_by_refresh_token(
+            refresh_token, scopes=MS_SCOPES,
+        )
+
+    if not result or 'access_token' not in result:
+        raise RuntimeError(
+            f'Failed to refresh Outlook/Graph token for {account.email_address}: '
+            f'{(result or {}).get("error_description") or (result or {}).get("error") or "no refresh_token stored"}'
+        )
+
+    # MSAL's refresh result may omit a new refresh_token (Microsoft doesn't
+    # always rotate it) — keep the old one in that case instead of losing it.
+    merged = dict(token_data)
+    merged.update(result)
+    if 'refresh_token' not in result and refresh_token:
+        merged['refresh_token'] = refresh_token
+
+    account.oauth_token = json.dumps(merged)
+    db.session.commit()
+
+    return merged['access_token']
 
 
 # ── NEW: Gmail API sender ─────────────────────────────────────────────────────
@@ -242,10 +320,102 @@ def send_gmail_api(account: EmailAccount, to_email: str, subject: str, plain: st
     return actual_message_id, gmail_thread_id
 
 
+# ── NEW (OutreachCommand Outlook/Graph task): Outlook sender ─────────────────
+
+def send_outlook_graph(account: EmailAccount, to_email: str, subject: str, plain: str, html: str, sender_name: str = '', in_reply_to: str = None, references: str = None, thread_id: str = None):
+    """Send email via Microsoft Graph's /me/sendMail using the account's
+    OAuth access token. Mirrors send_gmail_api()'s signature and return shape
+    (message_id, thread_id) exactly, so _send_email()'s caller (try_send_next_email
+    in this file) doesn't need to know which provider actually sent it.
+
+    IMPLEMENTATION NOTE (fixed after review): an earlier version of this
+    function sent via sendMail's JSON body with a custom "Message-ID" /
+    "In-Reply-To" / "References" entry in internetMessageHeaders. Per Graph's
+    own docs, custom headers set that way are only honored when their name
+    starts with "x-" — plain "Message-ID" etc. are silently dropped, so the
+    id we generated and stored in EmailLog.message_id never matched the real
+    outgoing message, and reply-threading silently never worked. Renaming
+    the headers to "x-Message-ID" etc. would not fix this either, since mail
+    clients only thread on the real (non-"x-") RFC headers.
+
+    Fixed by switching to sendMail's MIME body mode instead of its JSON body
+    mode: build a real MIME message locally (same email.mime.* construction
+    style send_gmail_api() already uses above), set Message-ID/In-Reply-To/
+    References directly on that MIME object as real headers, base64-encode
+    the raw bytes, and POST it to /me/sendMail with Content-Type: text/plain
+    (Graph's documented "send in MIME format" mode for this same endpoint —
+    see Microsoft Graph docs for user: sendMail, "Request body" / "MIME
+    format" section: the request body is just the base64 MIME string, sent
+    with Content-Type: text/plain, no JSON wrapper). This was chosen over
+    the two-step create-draft-then-send (/me/messages + /me/messages/{id}/send)
+    flow because sendMail's own MIME mode is the simpler, equally-documented,
+    single-call way to get real headers through, and it keeps this function
+    at the same one-request shape as send_smtp()/send_gmail_api().
+
+    sendMail still returns 202 Accepted with an empty body in MIME mode, so
+    (as before) we cannot read back a server-assigned id — we return the
+    real Message-ID we set on the MIME object ourselves, which — unlike the
+    old JSON-header version — is now the actual id on the wire.
+
+    thread_id is accepted for signature parity with send_gmail_api() but is
+    NOT used: Graph's REST send API has no equivalent of Gmail's threadId
+    parameter. Threading for Outlook-sent follow-ups relies entirely on the
+    real In-Reply-To/References MIME headers set below, same as the SMTP path.
+    """
+    access_token = _load_outlook_credentials(account)
+
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = subject
+    display = (sender_name or '').strip() or account.email_address
+    msg['From'] = formataddr((display, account.email_address))
+    msg['To'] = to_email
+
+    new_message_id = f'<{uuid.uuid4()}@{account.email_address.split("@")[-1]}>'
+    msg['Message-ID'] = new_message_id
+
+    if in_reply_to:
+        msg['In-Reply-To'] = in_reply_to
+        msg['References'] = references or in_reply_to
+
+    if plain:
+        msg.attach(MIMEText(plain, 'plain', 'utf-8'))
+    if html:
+        msg.attach(_build_html_part_with_images(html))
+
+    raw_mime = base64.b64encode(msg.as_bytes()).decode('ascii')
+
+    resp = requests.post(
+        'https://graph.microsoft.com/v1.0/me/sendMail',
+        headers={
+            'Authorization': f'Bearer {access_token}',
+            'Content-Type': 'text/plain',
+        },
+        data=raw_mime,
+        timeout=30,
+    )
+    if resp.status_code not in (200, 202):
+        raise RuntimeError(
+            f'Graph sendMail (MIME) failed ({resp.status_code}): {resp.text[:500]}'
+        )
+
+    # No thread_id equivalent from Graph, and no server-assigned id comes
+    # back in MIME mode either — see docstring above.
+    return new_message_id, None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 def _send_email(account: EmailAccount, to_email: str, subject: str, plain: str, html: str, sender_name: str = '', in_reply_to: str = None, references: str = None, thread_id: str = None):
-    """Smart dispatcher — uses OAuth if available, falls back to SMTP."""
+    """Smart dispatcher — uses OAuth if available, falls back to SMTP.
+
+    NEW (OutreachCommand Outlook/Graph task): when an OAuth account's
+    provider is 'outlook', route to send_outlook_graph() instead of
+    send_gmail_api(). getattr() with a 'gmail' default keeps this safe for
+    every pre-existing row, which has no provider column value set until the
+    migration backfills the default — those rows behave exactly as before.
+    """
     if account.auth_type == 'oauth' and account.oauth_token:
+        if getattr(account, 'provider', 'gmail') == 'outlook':
+            return send_outlook_graph(account, to_email, subject, plain, html, sender_name, in_reply_to, references, thread_id)
         return send_gmail_api(account, to_email, subject, plain, html, sender_name, in_reply_to, references, thread_id)
     else:
         return send_smtp(account, to_email, subject, plain, html, sender_name, in_reply_to, references)
