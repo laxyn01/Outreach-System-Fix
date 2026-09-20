@@ -1280,8 +1280,7 @@ MS_CLIENT_ID = os.getenv('MS_CLIENT_ID', 'a5d4c56e-8e9c-4018-ba95-e6fe6020f791')
 MS_CLIENT_SECRET = os.getenv('MS_CLIENT_SECRET')  # required, no default (secret)
 MS_TENANT_ID = os.getenv('MS_TENANT_ID', '60fbc714-18ee-4e01-8863-921c074bbf69')  # not used in authority — see note above
 MS_AUTHORITY = 'https://login.microsoftonline.com/common'
-MS_SCOPES = ['Mail.Send', 'Mail.ReadWrite', 'User.Read', 'offline_access']
-
+MS_SCOPES = ['Mail.Send', 'Mail.ReadWrite', 'User.Read']
 
 def _build_msal_app():
     import msal
