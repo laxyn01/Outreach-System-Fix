@@ -216,6 +216,15 @@ class EmailAccount(db.Model):
     consecutive_failures = db.Column(db.Integer, default=0)
     is_paused_auto = db.Column(db.Boolean, default=False)
 
+    # ── NEW: warmup system (kept 100% separate from daily_sent_count) ──
+    # daily_sent_count is RESERVED for real campaign sends. Warmup sends are
+    # counted here and nowhere else.
+    warmup_sent_today = db.Column(db.Integer, default=0)
+    warmup_last_reset_date = db.Column(db.Date)
+    warmup_next_allowed_send_at = db.Column(db.DateTime)
+    warmup_target_daily = db.Column(db.Integer, default=18)
+    warmup_daily_goal = db.Column(db.Integer, default=0)
+
     def reset_daily_if_needed(self):
         today = datetime.utcnow().date()
         if self.last_reset_date != today:
@@ -223,6 +232,22 @@ class EmailAccount(db.Model):
             self.last_reset_date = today
             if self.warmup_enabled:
                 self.warmup_day = min(self.warmup_day + 1, 30)
+
+    def reset_warmup_daily_if_needed(self):
+        """Roll the WARMUP counters for a new day.
+
+        Delegates the ramp-day / campaign-counter roll to the existing
+        reset_daily_if_needed() so warmup_day is still advanced exactly once
+        per day by the original code path, then rolls the warmup-only counters.
+        This never touches daily_sent_count itself.
+        """
+        self.reset_daily_if_needed()
+        today = datetime.utcnow().date()
+        if self.warmup_last_reset_date != today:
+            self.warmup_sent_today = 0
+            self.warmup_daily_goal = 0
+            self.warmup_next_allowed_send_at = None
+            self.warmup_last_reset_date = today
 
 
 class Template(db.Model):
@@ -262,6 +287,49 @@ class EmailLog(db.Model):
 
     lead = db.relationship('Lead', backref='logs')
     campaign = db.relationship('Campaign', backref='logs')
+
+
+class WarmupEmail(db.Model):
+    """One row per warmup email SENT between two of our own accounts.
+
+    This table is completely separate from EmailLog/Lead/CampaignLead so that
+    warmup traffic can never leak into real campaign analytics. (A mirror row
+    is still written to EmailLog with log_type='warmup' so the data is visible
+    in one place if you ever want a warmup log view — every existing page
+    filters on log_type='campaign', so it stays invisible to them.)
+    """
+    __tablename__ = 'warmup_emails'
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    sender_account_id = db.Column(db.Integer, db.ForeignKey('email_accounts.id'), nullable=True, index=True)
+    recipient_account_id = db.Column(db.Integer, db.ForeignKey('email_accounts.id'), nullable=True, index=True)
+    sender_email = db.Column(db.String(255))
+    recipient_email = db.Column(db.String(255), index=True)
+
+    subject = db.Column(db.String(500))
+    token = db.Column(db.String(64), index=True)
+    message_id = db.Column(db.String(255), index=True)
+    gmail_thread_id = db.Column(db.String(255))
+
+    sent_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    status = db.Column(db.String(50), default='sent')     # 'sent' | 'failed'
+    error_message = db.Column(db.Text)
+
+    # Threading / loop protection
+    is_reply = db.Column(db.Boolean, default=False, index=True)
+    parent_id = db.Column(db.Integer, db.ForeignKey('warmup_emails.id'), nullable=True, index=True)
+
+    # Deferred open simulation
+    open_due_at = db.Column(db.DateTime, index=True)
+    opened_at = db.Column(db.DateTime)
+
+    # Deferred auto-reply
+    delivered_detected_at = db.Column(db.DateTime)
+    reply_scheduled = db.Column(db.Boolean, default=False, index=True)
+    reply_due_at = db.Column(db.DateTime, index=True)
+    reply_sent = db.Column(db.Boolean, default=False, index=True)
+    replied_at = db.Column(db.DateTime)
 
 
 class Settings(db.Model):
@@ -310,6 +378,7 @@ def init_db(app):
     with app.app_context():
         db.create_all()
         _run_migrations()
+        _verify_warmup_schema()
         _backfill_campaign_leads()
         Settings.get_singleton()
 
@@ -339,6 +408,12 @@ def _run_migrations():
         "ALTER TABLE email_accounts ADD COLUMN is_paused_auto BOOLEAN DEFAULT FALSE",
         "ALTER TABLE email_logs ADD COLUMN variant_index INTEGER DEFAULT 0",
         "ALTER TABLE leads ADD COLUMN icebreaker TEXT",
+        # ── NEW: warmup system columns (valid PostgreSQL syntax) ──
+        "ALTER TABLE email_accounts ADD COLUMN IF NOT EXISTS warmup_sent_today INTEGER DEFAULT 0",
+        "ALTER TABLE email_accounts ADD COLUMN IF NOT EXISTS warmup_last_reset_date DATE",
+        "ALTER TABLE email_accounts ADD COLUMN IF NOT EXISTS warmup_next_allowed_send_at TIMESTAMP",
+        "ALTER TABLE email_accounts ADD COLUMN IF NOT EXISTS warmup_target_daily INTEGER DEFAULT 18",
+        "ALTER TABLE email_accounts ADD COLUMN IF NOT EXISTS warmup_daily_goal INTEGER DEFAULT 0",
     ]
     with db.engine.connect() as conn:
         for sql in migrations:
@@ -347,6 +422,55 @@ def _run_migrations():
                 conn.commit()
             except Exception:
                 conn.rollback()
+
+
+# Columns the warmup system cannot run without. The migration runner above
+# swallows errors silently, so we verify afterwards and print LOUDLY if a
+# column is missing instead of failing mysteriously at runtime later.
+_WARMUP_REQUIRED_COLUMNS = {
+    'email_accounts': [
+        'warmup_enabled',
+        'warmup_day',
+        'warmup_sent_today',
+        'warmup_last_reset_date',
+        'warmup_next_allowed_send_at',
+        'warmup_target_daily',
+        'warmup_daily_goal',
+    ],
+    'warmup_emails': [
+        'id', 'sender_account_id', 'recipient_account_id', 'sender_email',
+        'recipient_email', 'subject', 'token', 'message_id', 'gmail_thread_id',
+        'sent_at', 'status', 'error_message', 'is_reply', 'parent_id',
+        'open_due_at', 'opened_at', 'delivered_detected_at',
+        'reply_scheduled', 'reply_due_at', 'reply_sent', 'replied_at',
+    ],
+}
+
+
+def _verify_warmup_schema():
+    """Post-migration sanity check. Never raises — only reports."""
+    try:
+        from sqlalchemy import inspect as sa_inspect
+        inspector = sa_inspect(db.engine)
+        existing_tables = set(inspector.get_table_names())
+        missing = []
+        for table, cols in _WARMUP_REQUIRED_COLUMNS.items():
+            if table not in existing_tables:
+                missing.append(f'{table} (whole table missing)')
+                continue
+            present = {c['name'] for c in inspector.get_columns(table)}
+            for col in cols:
+                if col not in present:
+                    missing.append(f'{table}.{col}')
+        if missing:
+            print('[WARMUP][SCHEMA] MISSING COLUMNS -> warmup will be DISABLED: '
+                  + ', '.join(missing), flush=True)
+        else:
+            print('[WARMUP][SCHEMA] OK — all warmup columns/tables present.', flush=True)
+        return missing
+    except Exception as e:
+        print(f'[WARMUP][SCHEMA] verification skipped: {e}', flush=True)
+        return []
 
 
 def _backfill_campaign_leads():
