@@ -315,11 +315,12 @@ def _get_campaign_analytics(campaign_id):
     click_rate = round(total_clicked / total_sent * 100, 1) if total_sent else 0
     reply_rate = round(total_replied / total_sent * 100, 1) if total_sent else 0
 
-    # NEW: per-step (FU1-4) stats
-    step_stats = {}
-    variant_stats = {}
     campaign = Campaign.query.get(campaign_id)
     campaign_steps = campaign.get_steps() if campaign else []
+
+    # Per-step (FU1-4) stats + per-variant breakdown
+    step_stats = {}
+    variant_stats = {}
     for step in [1, 2, 3, 4]:
         step_logs = [l for l in logs if l.step == step]
         step_sent = len(step_logs)
@@ -327,7 +328,6 @@ def _get_campaign_analytics(campaign_id):
         step_rate = round(step_opened / step_sent * 100, 1) if step_sent else 0
         step_stats[f'FU{step}'] = {'sent': step_sent, 'opened': step_opened, 'rate': step_rate}
 
-        # Variant-wise breakdown for this step
         step_idx = step - 1
         variants_meta = []
         if step_idx < len(campaign_steps):
@@ -338,7 +338,7 @@ def _get_campaign_analytics(campaign_id):
             v_sent = len(v_logs)
             v_opened = sum(1 for l in v_logs if l.opened_at)
             v_rate = round(v_opened / v_sent * 100, 1) if v_sent else 0
-            label = chr(65 + v_idx)  # A, B, C...
+            label = chr(65 + v_idx)
             subject_preview = (v_meta.get('subject', '') or '')[:40]
             body_preview = (v_meta.get('body', '') or '')
             import re as _re
@@ -789,6 +789,7 @@ def account_delete(account_id):
     flash('Account deleted.', 'success')
     return redirect(url_for('accounts'))
 
+
 @app.route('/accounts/<int:account_id>/reset-health', methods=['POST'])
 def account_reset_health(account_id):
     acc = EmailAccount.query.get_or_404(account_id)
@@ -799,6 +800,7 @@ def account_reset_health(account_id):
     db.session.commit()
     flash('Account health reset.', 'success')
     return redirect(url_for('accounts'))
+
 
 @app.route('/accounts/<int:account_id>/test', methods=['POST'])
 def account_test(account_id):
@@ -1137,11 +1139,6 @@ def unsubscribe(lead_id):
     return render_template('unsubscribe.html', name='there')
 
 # ─── Gmail OAuth Routes ──────────────────────────────────────────────────────
-# Paste these routes AFTER the existing accounts routes in app.py
-# Also add these imports at the top of app.py:
-#   import json
-#   from google_auth_oauthlib.flow import Flow
-
 
 @app.route('/accounts/connect-gmail')
 def connect_gmail():
@@ -1160,7 +1157,8 @@ def connect_gmail():
         client_config,
         scopes=[
        'https://www.googleapis.com/auth/gmail.send',
-       'https://www.googleapis.com/auth/gmail.readonly',     
+       'https://www.googleapis.com/auth/gmail.readonly',
+       'https://www.googleapis.com/auth/gmail.modify',
        'https://www.googleapis.com/auth/userinfo.email',
    ],
         redirect_uri=url_for('oauth2callback', _external=True),
@@ -1200,6 +1198,7 @@ def oauth2callback():
         scopes=[
             'https://www.googleapis.com/auth/gmail.send',
             'https://www.googleapis.com/auth/gmail.readonly',
+            'https://www.googleapis.com/auth/gmail.modify',
             'https://www.googleapis.com/auth/userinfo.email',
         ],
         state=state,
