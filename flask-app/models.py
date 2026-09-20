@@ -210,7 +210,12 @@ class EmailAccount(db.Model):
     warmup_day = db.Column(db.Integer, default=1)
     # ── NEW: OAuth support ──
     auth_type = db.Column(db.String(10), default='smtp')   # 'smtp' or 'oauth'
-    oauth_token = db.Column(db.Text, default=None)          # JSON token from Google
+    oauth_token = db.Column(db.Text, default=None)          # JSON token (Google or Microsoft shape)
+    # ── NEW (OutreachCommand task): provider distinguishes which OAuth flow/shape
+    # oauth_token holds. Default 'gmail' so every existing row keeps working
+    # unchanged with zero migration risk. Code that reads oauth_token MUST
+    # check provider first before trying to parse/refresh it.
+    provider = db.Column(db.String(20), default='gmail')     # 'gmail' or 'outlook'
     last_error = db.Column(db.Text)
     last_error_at = db.Column(db.DateTime)
     consecutive_failures = db.Column(db.Integer, default=0)
@@ -414,6 +419,8 @@ def _run_migrations():
         "ALTER TABLE email_accounts ADD COLUMN IF NOT EXISTS warmup_next_allowed_send_at TIMESTAMP",
         "ALTER TABLE email_accounts ADD COLUMN IF NOT EXISTS warmup_target_daily INTEGER DEFAULT 18",
         "ALTER TABLE email_accounts ADD COLUMN IF NOT EXISTS warmup_daily_goal INTEGER DEFAULT 0",
+        # ── NEW (OutreachCommand Outlook/Graph task): provider column ──
+        "ALTER TABLE email_accounts ADD COLUMN IF NOT EXISTS provider VARCHAR(20) DEFAULT 'gmail'",
     ]
     with db.engine.connect() as conn:
         for sql in migrations:
