@@ -90,4 +90,5 @@ def ensure_html_wrapper(body: str, is_html: bool) -> tuple:
         f'<html><body style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#333;">'
         f'<div>{body_escaped}</div>'
         f'</body></html>'
-)
+    )
+    return plain, html
