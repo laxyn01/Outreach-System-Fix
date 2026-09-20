@@ -150,13 +150,19 @@ def send_smtp(account: EmailAccount, to_email: str, subject: str, plain: str, ht
     return new_message_id, None
 
 
-# ── NEW: Gmail API sender ─────────────────────────────────────────────────────
+# ── NEW: shared OAuth credential loader ───────────────────────────────────────
 
-def send_gmail_api(account: EmailAccount, to_email: str, subject: str, plain: str, html: str, sender_name: str = '', in_reply_to: str = None, references: str = None, thread_id: str = None):
-    """Send email via Gmail API using stored OAuth token."""
+def _load_oauth_credentials(account: EmailAccount):
+    """Build a google Credentials object from account.oauth_token, refreshing
+    and persisting the access token if it has expired.
+
+    This is the credential-loading block that used to live inline inside
+    send_gmail_api(); it was extracted verbatim so other modules (warmup.py)
+    can reuse the exact same construction and refresh behaviour instead of
+    duplicating it. send_gmail_api() now calls this and is otherwise unchanged.
+    """
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
-    from googleapiclient.discovery import build
 
     token_data = json.loads(account.oauth_token)
     creds = Credentials(
@@ -173,6 +179,17 @@ def send_gmail_api(account: EmailAccount, to_email: str, subject: str, plain: st
         token_data['token'] = creds.token
         account.oauth_token = json.dumps(token_data)
         db.session.commit()
+
+    return creds
+
+
+# ── NEW: Gmail API sender ─────────────────────────────────────────────────────
+
+def send_gmail_api(account: EmailAccount, to_email: str, subject: str, plain: str, html: str, sender_name: str = '', in_reply_to: str = None, references: str = None, thread_id: str = None):
+    """Send email via Gmail API using stored OAuth token."""
+    from googleapiclient.discovery import build
+
+    creds = _load_oauth_credentials(account)
 
     service = build('gmail', 'v1', credentials=creds)
 
