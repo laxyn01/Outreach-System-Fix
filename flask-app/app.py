@@ -4,6 +4,8 @@ import base64
 import csv
 import io
 import os
+import requests
+import secrets
 from datetime import datetime, timedelta
 
 from flask import (
@@ -1233,17 +1235,156 @@ def oauth2callback():
     if existing:
         existing.oauth_token = json.dumps(token_data)
         existing.auth_type = 'oauth'
+        existing.provider = 'gmail'
     else:
         acc = EmailAccount(
             email_address=email,
             app_password='',
             auth_type='oauth',
             oauth_token=json.dumps(token_data),
+            provider='gmail',
         )
         db.session.add(acc)
     db.session.commit()
     flash(f'Gmail account {email} connected via OAuth!', 'success')
     return redirect(url_for('accounts'))
+
+
+# ─── Microsoft Outlook/Graph OAuth Routes (NEW) ──────────────────────────────
+#
+# These two routes mirror connect_gmail() / oauth2callback() above exactly in
+# shape (build auth URL -> redirect -> exchange code -> decode email -> upsert
+# EmailAccount), but use MSAL's ConfidentialClientApplication instead of
+# google_auth_oauthlib, because Microsoft's identity platform (and MSAL) is
+# what Graph API OAuth expects — manually building the authorize URL is
+# unnecessary and error-prone by comparison.
+#
+# AUTHORITY CHOICE — read before changing:
+# The Azure App Registration for this app is "Any Entra ID Tenant + Personal
+# Microsoft accounts", which is Microsoft's `AzureADandPersonalMicrosoftAccount`
+# sign-in audience. Per Microsoft identity platform / MSAL docs, the matching
+# authority for that audience is the tenant alias "common":
+#     https://login.microsoftonline.com/common
+# NOT the GUID tenant ID (that would restrict sign-in to a single Entra ID
+# tenant and reject personal @outlook.com/@hotmail.com accounts), and NOT
+# "consumers" (that authority is for apps registered as "Personal Microsoft
+# accounts only" — using it against an "Any Entra ID Tenant + Personal" app
+# registration works for personal accounts too, but "common" is the
+# audience-correct choice for this registration type and is what Microsoft's
+# own quickstarts use by default for multi-tenant + personal apps).
+# The GUID tenant ID is kept only as MS_TENANT_ID in case a future change to
+# the app registration (e.g. restricting to a single work/school tenant)
+# requires switching authorities — it is NOT used in the authority URL today.
+
+MS_CLIENT_ID = os.getenv('MS_CLIENT_ID', 'a5d4c56e-8e9c-4018-ba95-e6fe6020f791')
+MS_CLIENT_SECRET = os.getenv('MS_CLIENT_SECRET')  # required, no default (secret)
+MS_TENANT_ID = os.getenv('MS_TENANT_ID', '60fbc714-18ee-4e01-8863-921c074bbf69')  # not used in authority — see note above
+MS_AUTHORITY = 'https://login.microsoftonline.com/common'
+MS_SCOPES = ['Mail.Send', 'Mail.ReadWrite', 'User.Read', 'offline_access']
+
+
+def _build_msal_app():
+    import msal
+    return msal.ConfidentialClientApplication(
+        MS_CLIENT_ID,
+        authority=MS_AUTHORITY,
+        client_credential=MS_CLIENT_SECRET,
+    )
+
+
+@app.route('/accounts/connect-outlook')
+def connect_outlook():
+    from flask import session
+    msal_app = _build_msal_app()
+    redirect_uri = url_for('microsoft_callback', _external=True)
+    # CSRF protection, matching connect_gmail()/oauth2callback()'s
+    # session['oauth_state'] pattern: get_authorization_request_url() doesn't
+    # generate or verify state itself the way google_auth_oauthlib's
+    # flow.authorization_url() does, so we generate and check it ourselves.
+    state = secrets.token_urlsafe(16)
+    auth_url = msal_app.get_authorization_request_url(
+        MS_SCOPES,
+        redirect_uri=redirect_uri,
+        state=state,
+    )
+    session['ms_redirect_uri'] = redirect_uri
+    session['ms_oauth_state'] = state
+    return redirect(auth_url)
+
+
+@app.route('/microsoft/callback')
+def microsoft_callback():
+    """Microsoft redirects here after the user approves — save token to DB."""
+    from flask import session
+    code = request.args.get('code')
+    if not code:
+        error_desc = request.args.get('error_description', 'No authorization code returned.')
+        flash(f'Outlook connection failed: {error_desc}', 'error')
+        return redirect(url_for('accounts'))
+
+    expected_state = session.pop('ms_oauth_state', None)
+    returned_state = request.args.get('state')
+    if not expected_state or returned_state != expected_state:
+        flash('Outlook connection failed: invalid or missing OAuth state (possible CSRF, or session expired — please try connecting again).', 'error')
+        return redirect(url_for('accounts'))
+
+    redirect_uri = session.get('ms_redirect_uri') or url_for('microsoft_callback', _external=True)
+    msal_app = _build_msal_app()
+    result = msal_app.acquire_token_by_authorization_code(
+        code,
+        scopes=MS_SCOPES,
+        redirect_uri=redirect_uri,
+    )
+
+    if 'access_token' not in result:
+        err = result.get('error_description') or result.get('error') or 'Unknown error'
+        flash(f'Outlook connection failed: {err}', 'error')
+        return redirect(url_for('accounts'))
+
+    # Get the account's email address via Graph /me rather than decoding the
+    # id_token, since /me is guaranteed to return `mail` or `userPrincipalName`
+    # for both personal and work/school accounts.
+    email = ''
+    try:
+        graph_resp = requests.get(
+            'https://graph.microsoft.com/v1.0/me',
+            headers={'Authorization': f'Bearer {result["access_token"]}'},
+            timeout=10,
+        )
+        graph_resp.raise_for_status()
+        me = graph_resp.json()
+        email = (me.get('mail') or me.get('userPrincipalName') or '').lower()
+    except Exception as e:
+        flash(f'Outlook connection failed: could not read account email ({e})', 'error')
+        return redirect(url_for('accounts'))
+
+    if not email:
+        flash('Outlook connection failed: no email address returned by Microsoft Graph.', 'error')
+        return redirect(url_for('accounts'))
+
+    # MSAL's result dict is what _load_outlook_credentials() in email_sender.py
+    # expects to parse back out (access_token, refresh_token, expires_in, etc.)
+    token_data = dict(result)
+
+    existing = EmailAccount.query.filter_by(email_address=email).first()
+    if existing:
+        existing.oauth_token = json.dumps(token_data)
+        existing.auth_type = 'oauth'
+        existing.provider = 'outlook'
+    else:
+        acc = EmailAccount(
+            email_address=email,
+            app_password='',
+            auth_type='oauth',
+            oauth_token=json.dumps(token_data),
+            provider='outlook',
+        )
+        db.session.add(acc)
+    db.session.commit()
+    flash(f'Outlook account {email} connected via Microsoft Graph!', 'success')
+    return redirect(url_for('accounts'))
+
+
 @app.route('/upload-image', methods=['POST'])
 def upload_image():
     import cloudinary
