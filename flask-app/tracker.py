@@ -85,9 +85,9 @@ def ensure_html_wrapper(body: str, is_html: bool) -> tuple:
     # Plain text: keep as-is, also create HTML version preserving whitespace
     plain = body
     body_escaped = body.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+    body_escaped = body_escaped.replace('\n', '<br>\n')
     html = (
         f'<html><body style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#333;">'
-        f'<div style="white-space:pre-wrap;">{body_escaped}</div>'
+        f'<div>{body_escaped}</div>'
         f'</body></html>'
-    )
-    return plain, html
+)
