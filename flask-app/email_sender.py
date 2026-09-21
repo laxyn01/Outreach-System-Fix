@@ -455,7 +455,7 @@ def send_outlook_graph(account: EmailAccount, to_email: str, subject: str, plain
          'Prefer': 'IdType="ImmutableId"',
     }
 
-    rendered_html, attachments = _build_outlook_attachments(html) if html else (None, [])
+    rendered_html, attachments = (html, [])
     if rendered_html is not None:
         body_content = rendered_html
         content_type = 'HTML'
