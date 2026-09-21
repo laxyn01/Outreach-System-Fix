@@ -199,7 +199,7 @@ def _load_oauth_credentials(account: EmailAccount):
 MS_CLIENT_ID = os.getenv('MS_CLIENT_ID', 'a5d4c56e-8e9c-4018-ba95-e6fe6020f791')
 MS_CLIENT_SECRET = os.getenv('MS_CLIENT_SECRET')
 MS_AUTHORITY = 'https://login.microsoftonline.com/common'
-MS_SCOPES = ['Mail.Send', 'Mail.ReadWrite', 'User.Read']
+MS_SCOPES = ['Mail.Send', 'Mail.ReadWrite', 'User.Read', 'offline_access']
 
 
 def _load_outlook_credentials(account: EmailAccount) -> str:
@@ -322,85 +322,217 @@ def send_gmail_api(account: EmailAccount, to_email: str, subject: str, plain: st
 
 # ── NEW (OutreachCommand Outlook/Graph task): Outlook sender ─────────────────
 
+def _build_outlook_attachments(html: str):
+    """Outlook/Graph analogue of _build_html_part_with_images() above — NOT a
+    modification of it, a separate helper, since Graph's JSON attachment
+    model (fileAttachment objects + cid: references in the html) is a
+    completely different shape from that function's MIME multipart/related
+    output. Graph's MIME-import parsing does not reliably preserve nested
+    multipart/alternative > multipart/related > inline-cid structures, so
+    images sent that way arrive as regular attachments instead of inline
+    (confirmed in production) — the JSON attachment model with isInline=True
+    is what actually renders inline in Outlook/OWA.
+
+    Mirrors _build_html_part_with_images()'s URL-detection/download logic
+    exactly (same Cloudinary regex, same requests.get + Content-Type
+    handling, same graceful fallback of leaving the original src="..." in
+    place on any download failure) — only the output shape differs: a
+    (new_html, attachments) tuple instead of a MIME part object.
+
+    Returns (html, []) unchanged if html is falsy or has no Cloudinary images.
+    """
+    if not html:
+        return html, []
+
+    attachments = []
+
+    def repl(match):
+        url = match.group(1)
+        try:
+            resp = requests.get(url, timeout=8)
+            resp.raise_for_status()
+            cid = uuid.uuid4().hex
+            content_type = resp.headers.get('Content-Type', 'image/jpeg').split(';')[0]
+            subtype = content_type.split('/')[-1] or 'jpeg'
+            ext = 'jpg' if subtype == 'jpeg' else subtype
+            attachments.append({
+                '@odata.type': '#microsoft.graph.fileAttachment',
+                'name': f'image.{ext}',
+                'contentType': content_type,
+                'contentBytes': base64.b64encode(resp.content).decode('ascii'),
+                'contentId': cid,
+                'isInline': True,
+            })
+            return f'src="cid:{cid}"'
+        except Exception:
+            return match.group(0)
+
+    new_html = re.sub(r'src="(https://res\.cloudinary\.com/[^"]+)"', repl, html)
+    return new_html, attachments
+
+
 def send_outlook_graph(account: EmailAccount, to_email: str, subject: str, plain: str, html: str, sender_name: str = '', in_reply_to: str = None, references: str = None, thread_id: str = None):
-    """Send email via Microsoft Graph's /me/sendMail using the account's
-    OAuth access token. Mirrors send_gmail_api()'s signature and return shape
-    (message_id, thread_id) exactly, so _send_email()'s caller (try_send_next_email
-    in this file) doesn't need to know which provider actually sent it.
+    """Send email via Microsoft Graph using the account's OAuth access token.
+    Mirrors send_gmail_api()'s signature exactly, so _send_email()'s caller
+    (try_send_next_email in this file) doesn't need to know which provider
+    actually sent it.
 
-    IMPLEMENTATION NOTE (fixed after review): an earlier version of this
-    function sent via sendMail's JSON body with a custom "Message-ID" /
-    "In-Reply-To" / "References" entry in internetMessageHeaders. Per Graph's
-    own docs, custom headers set that way are only honored when their name
-    starts with "x-" — plain "Message-ID" etc. are silently dropped, so the
-    id we generated and stored in EmailLog.message_id never matched the real
-    outgoing message, and reply-threading silently never worked. Renaming
-    the headers to "x-Message-ID" etc. would not fix this either, since mail
-    clients only thread on the real (non-"x-") RFC headers.
+    RETURN SHAPE (repurposed, read this before touching the caller):
+    Returns (internet_message_id, graph_internal_id) — same 2-tuple position
+    as send_gmail_api()'s (message_id, thread_id), but the second element is
+    NOT a Gmail-style thread id (Graph's REST API has no equivalent). It is
+    Graph's own internal message `id` for the message THIS call just sent.
+    The caller must persist it as EmailLog.outlook_message_id (a new column,
+    NOT gmail_thread_id) so a later follow-up in the same lead's sequence can
+    look this message back up via createReply() (see below) — that internal
+    `id` is the only thing createReply() accepts; the RFC internetMessageId
+    is useless for that lookup.
 
-    Fixed by switching to sendMail's MIME body mode instead of its JSON body
-    mode: build a real MIME message locally (same email.mime.* construction
-    style send_gmail_api() already uses above), set Message-ID/In-Reply-To/
-    References directly on that MIME object as real headers, base64-encode
-    the raw bytes, and POST it to /me/sendMail with Content-Type: text/plain
-    (Graph's documented "send in MIME format" mode for this same endpoint —
-    see Microsoft Graph docs for user: sendMail, "Request body" / "MIME
-    format" section: the request body is just the base64 MIME string, sent
-    with Content-Type: text/plain, no JSON wrapper). This was chosen over
-    the two-step create-draft-then-send (/me/messages + /me/messages/{id}/send)
-    flow because sendMail's own MIME mode is the simpler, equally-documented,
-    single-call way to get real headers through, and it keeps this function
-    at the same one-request shape as send_smtp()/send_gmail_api().
+    `thread_id` (an INPUT param here) is likewise repurposed on the way IN:
+    the caller passes the PREVIOUS step's EmailLog.outlook_message_id through
+    this parameter (the same way it already passes the previous step's Gmail
+    threadId to send_gmail_api() via this same parameter) so this function
+    knows which existing Graph message to reply to. If in_reply_to is set
+    but thread_id is not (e.g. an old row from before this column existed),
+    this function falls back to a fresh (non-threaded) message rather than
+    failing, since createReply() cannot work without Graph's internal id.
 
-    sendMail still returns 202 Accepted with an empty body in MIME mode, so
-    (as before) we cannot read back a server-assigned id — we return the
-    real Message-ID we set on the MIME object ourselves, which — unlike the
-    old JSON-header version — is now the actual id on the wire.
+    WHY THIS VERSION (previous attempts and their failures):
+    v1 sent a JSON body to /me/sendMail with custom "Message-ID"/"In-Reply-To"
+    /"References" entries in internetMessageHeaders. Per Graph's own docs,
+    custom headers are only honored when their name starts with "x-" — plain
+    RFC header names there are silently dropped, so neither the id we stored
+    nor the threading ever actually worked.
+    v2 switched to building a real MIME message and POSTing it as base64 to
+    /me/sendMail with Content-Type: text/plain, to get real headers through.
+    That fixed the header-naming issue, but production testing surfaced a
+    deeper problem: Exchange Online's transport pipeline commonly REPLACES a
+    client-supplied Message-ID with its own server-generated one while
+    parsing arbitrary inbound MIME content — so the id we generated and
+    stored still never matched the real delivered message, and a real
+    follow-up test landed as a separate thread instead of nesting. The same
+    MIME-import path also doesn't reliably preserve nested
+    multipart/alternative > multipart/related > inline-cid structures, so
+    inline Cloudinary images arrived as plain attachments instead.
 
-    thread_id is accepted for signature parity with send_gmail_api() but is
-    NOT used: Graph's REST send API has no equivalent of Gmail's threadId
-    parameter. Threading for Outlook-sent follow-ups relies entirely on the
-    real In-Reply-To/References MIME headers set below, same as the SMTP path.
+    Both problems trace back to the same thing: routing content through
+    Graph's raw-MIME-import parser instead of its native message model. This
+    version (v3) avoids that entirely by building the message as Graph's own
+    JSON Message resource. Creating a message via POST /me/messages returns
+    the full Message resource, including `id` and `internetMessageId` set by
+    Graph itself at creation time — that IS the real id Exchange delivers
+    with, not something transport can silently rewrite afterwards. Threading
+    uses Graph's own createReply() action, which sets References/In-Reply-To
+    /conversationId correctly itself (we still cannot set those directly —
+    the same "x-" prefix restriction on custom headers applies to the JSON
+    model too).
+
+    Flow:
+      - If in_reply_to AND thread_id (the previous message's Graph internal
+        id) are both present: POST .../messages/{thread_id}/createReply to
+        get a correctly-threaded draft, PATCH its subject/body/toRecipients
+        with our actual follow-up content (createReply's draft starts out
+        with quoted-original boilerplate we don't want), then attach any
+        inline images one-by-one via POST .../messages/{id}/attachments —
+        Graph does NOT accept an attachments array in a PATCH to an existing
+        message, only in the create call for a brand-new message.
+      - Otherwise (first email in a sequence, or no stored Graph id to reply
+        to): POST .../messages with the full message body AND inline
+        attachments array in one call — Graph's docs confirm attachments can
+        be embedded directly in a message-create call ("you can add an
+        attachment to a message that is being created and sent on the fly").
+      - Either way, finish with POST .../messages/{id}/send (empty body) to
+        send the now-fully-built draft.
     """
     access_token = _load_outlook_credentials(account)
+    headers_json = {
+        'Authorization': f'Bearer {access_token}',
+        'Content-Type': 'application/json',
+    }
+    headers_bearer = {'Authorization': f'Bearer {access_token}'}
 
-    msg = MIMEMultipart('alternative')
-    msg['Subject'] = subject
-    display = (sender_name or '').strip() or account.email_address
-    msg['From'] = formataddr((display, account.email_address))
-    msg['To'] = to_email
+    rendered_html, attachments = _build_outlook_attachments(html) if html else (None, [])
+    if rendered_html is not None:
+        body_content = rendered_html
+        content_type = 'HTML'
+    else:
+        body_content = plain or ''
+        content_type = 'Text'
 
-    new_message_id = f'<{uuid.uuid4()}@{account.email_address.split("@")[-1]}>'
-    msg['Message-ID'] = new_message_id
+    message_body = {
+        'subject': subject,
+        'body': {'contentType': content_type, 'content': body_content},
+        'toRecipients': [{'emailAddress': {'address': to_email}}],
+    }
 
-    if in_reply_to:
-        msg['In-Reply-To'] = in_reply_to
-        msg['References'] = references or in_reply_to
+    is_reply = bool(in_reply_to and thread_id)
 
-    if plain:
-        msg.attach(MIMEText(plain, 'plain', 'utf-8'))
-    if html:
-        msg.attach(_build_html_part_with_images(html))
+    if is_reply:
+        reply_resp = requests.post(
+            f'https://graph.microsoft.com/v1.0/me/messages/{thread_id}/createReply',
+            headers=headers_json, json={}, timeout=30,
+        )
+        if reply_resp.status_code not in (200, 201):
+            raise RuntimeError(
+                f'Graph createReply failed ({reply_resp.status_code}): {reply_resp.text[:500]}'
+            )
+        draft = reply_resp.json()
+        draft_id = draft.get('id')
 
-    raw_mime = base64.b64encode(msg.as_bytes()).decode('ascii')
+        # createReply's draft starts pre-filled with quoted-original
+        # boilerplate and the original recipients — overwrite with our own
+        # follow-up subject/body/toRecipients. (No attachments here: Graph
+        # rejects an attachments array on PATCH to an existing message.)
+        patch_resp = requests.patch(
+            f'https://graph.microsoft.com/v1.0/me/messages/{draft_id}',
+            headers=headers_json, json=message_body, timeout=30,
+        )
+        if patch_resp.status_code not in (200, 201):
+            raise RuntimeError(
+                f'Graph reply-draft update failed ({patch_resp.status_code}): {patch_resp.text[:500]}'
+            )
+        if patch_resp.text:
+            draft = patch_resp.json()
 
-    resp = requests.post(
-        'https://graph.microsoft.com/v1.0/me/sendMail',
-        headers={
-            'Authorization': f'Bearer {access_token}',
-            'Content-Type': 'text/plain',
-        },
-        data=raw_mime,
-        timeout=30,
-    )
-    if resp.status_code not in (200, 202):
+        for att in attachments:
+            att_resp = requests.post(
+                f'https://graph.microsoft.com/v1.0/me/messages/{draft_id}/attachments',
+                headers=headers_json, json=att, timeout=30,
+            )
+            if att_resp.status_code not in (200, 201):
+                raise RuntimeError(
+                    f'Graph add-attachment failed ({att_resp.status_code}): {att_resp.text[:500]}'
+                )
+    else:
+        if attachments:
+            message_body['attachments'] = attachments
+        create_resp = requests.post(
+            'https://graph.microsoft.com/v1.0/me/messages',
+            headers=headers_json, json=message_body, timeout=30,
+        )
+        if create_resp.status_code not in (200, 201):
+            raise RuntimeError(
+                f'Graph create-message failed ({create_resp.status_code}): {create_resp.text[:500]}'
+            )
+        draft = create_resp.json()
+        draft_id = draft.get('id')
+
+    real_internet_message_id = draft.get('internetMessageId')
+    if not draft_id or not real_internet_message_id:
         raise RuntimeError(
-            f'Graph sendMail (MIME) failed ({resp.status_code}): {resp.text[:500]}'
+            f'Graph did not return an id/internetMessageId for the new message: {draft}'
         )
 
-    # No thread_id equivalent from Graph, and no server-assigned id comes
-    # back in MIME mode either — see docstring above.
-    return new_message_id, None
+    send_resp = requests.post(
+        f'https://graph.microsoft.com/v1.0/me/messages/{draft_id}/send',
+        headers=headers_bearer, timeout=30,
+    )
+    if send_resp.status_code not in (200, 202):
+        raise RuntimeError(
+            f'Graph message-send failed ({send_resp.status_code}): {send_resp.text[:500]}'
+        )
+
+    return real_internet_message_id, draft_id
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -519,7 +651,16 @@ def try_send_next_email() -> dict:
             if prev_log and prev_log.message_id:
                 in_reply_to = prev_log.message_id
                 references = prev_log.message_id
-                thread_id = prev_log.gmail_thread_id
+                # NEW (Outlook/Graph threading fix): Outlook accounts need
+                # the PREVIOUS message's Graph-internal id (createReply()
+                # only accepts that, not the RFC message_id/internetMessageId
+                # above) — reuse this same thread_id slot to carry it through
+                # to send_outlook_graph(), exactly the way it already carries
+                # Gmail's threadId through to send_gmail_api().
+                if getattr(account, 'provider', 'gmail') == 'outlook':
+                    thread_id = prev_log.outlook_message_id
+                else:
+                    thread_id = prev_log.gmail_thread_id
                 # Reuse the ORIGINAL thread's subject so Gmail groups it
                 orig_subject = prev_log.subject or subject
                 if orig_subject.lower().startswith('re:'):
@@ -536,11 +677,19 @@ def try_send_next_email() -> dict:
             account.consecutive_failures = 0
             account.is_paused_auto = False
             settings.next_allowed_send_at = now + timedelta(seconds=random.randint(60, 120))
+            # NEW (Outlook/Graph threading fix): send_outlook_graph() returns
+            # Graph's internal message id in the same tuple slot Gmail uses
+            # for its threadId — route it to the new outlook_message_id
+            # column instead of gmail_thread_id so a later follow-up's
+            # createReply() lookup (above) finds the right column.
+            is_outlook = getattr(account, 'provider', 'gmail') == 'outlook'
             log = EmailLog(
                 lead_id=lead.id, account_used=account.email_address, step=step,
                 subject=subject, sent_at=now, log_type='campaign', status='sent',
                 lead_email=lead.email, lead_name=lead.full_name, campaign_id=cl.campaign_id,
-                tracking_token=tracking_token, message_id=new_message_id, gmail_thread_id=new_thread_id,
+                tracking_token=tracking_token, message_id=new_message_id,
+                gmail_thread_id=(None if is_outlook else new_thread_id),
+                outlook_message_id=(new_thread_id if is_outlook else None),
                 variant_index=variant_idx,
             )
             db.session.add(log)
