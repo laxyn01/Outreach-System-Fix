@@ -287,6 +287,15 @@ class EmailLog(db.Model):
     tracking_token = db.Column(db.String(64), index=True)
     message_id = db.Column(db.String(255))
     gmail_thread_id = db.Column(db.String(255))
+    # ── NEW (OutreachCommand Outlook/Graph threading fix): Graph's own
+    # internal message `id` (NOT the RFC internetMessageId, which is what
+    # `message_id` above already stores for every provider). Needed because
+    # replying to a Graph message via POST /me/messages/{id}/createReply
+    # requires Graph's internal id, not the internetMessageId — the two are
+    # different values and only Graph's internal id can be used to look a
+    # message back up for createReply. Only ever populated for
+    # provider == 'outlook' rows; NULL for every Gmail/SMTP row.
+    outlook_message_id = db.Column(db.String(255))
     error_message = db.Column(db.Text)
     variant_index = db.Column(db.Integer, default=0)
 
@@ -421,6 +430,10 @@ def _run_migrations():
         "ALTER TABLE email_accounts ADD COLUMN IF NOT EXISTS warmup_daily_goal INTEGER DEFAULT 0",
         # ── NEW (OutreachCommand Outlook/Graph task): provider column ──
         "ALTER TABLE email_accounts ADD COLUMN IF NOT EXISTS provider VARCHAR(20) DEFAULT 'gmail'",
+        # ── NEW (OutreachCommand Outlook/Graph threading fix): Graph internal
+        # message id, separate from the RFC internetMessageId already stored
+        # in email_logs.message_id — needed for createReply() lookups.
+        "ALTER TABLE email_logs ADD COLUMN IF NOT EXISTS outlook_message_id VARCHAR(255)",
     ]
     with db.engine.connect() as conn:
         for sql in migrations:
