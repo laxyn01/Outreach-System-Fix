@@ -448,8 +448,12 @@ def send_outlook_graph(account: EmailAccount, to_email: str, subject: str, plain
     headers_json = {
         'Authorization': f'Bearer {access_token}',
         'Content-Type': 'application/json',
+        'Prefer': 'IdType="ImmutableId"',
     }
-    headers_bearer = {'Authorization': f'Bearer {access_token}'}
+    headers_bearer = {
+         'Authorization': f'Bearer {access_token}',
+         'Prefer': 'IdType="ImmutableId"',
+    }
 
     rendered_html, attachments = _build_outlook_attachments(html) if html else (None, [])
     if rendered_html is not None:
