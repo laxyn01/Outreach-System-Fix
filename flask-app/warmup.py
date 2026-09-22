@@ -762,7 +762,7 @@ def scan_warmup_inboxes() -> dict:
             # OAuth accounts get Gmail's real "Report not spam" action via the
             # API; SMTP / app-password accounts keep the original IMAP
             # copy+delete move, unchanged.
-            if account.auth_type == 'oauth' and account.oauth_token:
+            if account.auth_type == 'oauth' and account.oauth_token and getattr(account, 'provider', 'gmail') == 'gmail':
                 try:
                     _rescue_from_spam_gmail_api(account, peer_addresses)
                 except Exception as e:
