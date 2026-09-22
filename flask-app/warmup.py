@@ -623,10 +623,13 @@ def process_warmup_opens() -> dict:
 
             mark_important = random.random() < IMPORTANT_PROBABILITY
 
+                        marked_seen = True   # SMTP/IMAP path assumed successful unless api path fails
+
             if use_api:
                 seen_ok, important_ok = _open_via_gmail_api(
                     service, account, row.message_id, mark_important
                 )
+                marked_seen = seen_ok
                 if important_ok:
                     important += 1
             elif mail is not None:
@@ -634,6 +637,11 @@ def process_warmup_opens() -> dict:
                 if mark_important:
                     # No dependable IMAP equivalent — see the note above.
                     important_skipped_smtp += 1
+
+            if not marked_seen:
+                continue   # scope/API failure — don't mark opened, retry next run
+
+            row.opened_at = now
 
             row.opened_at = now
             log = EmailLog.query.filter_by(
