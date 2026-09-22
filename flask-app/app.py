@@ -1162,6 +1162,7 @@ def connect_gmail():
        'https://www.googleapis.com/auth/gmail.readonly',
        'https://www.googleapis.com/auth/gmail.modify',
        'https://www.googleapis.com/auth/userinfo.email',
+       'https://mail.google.com/',
    ],
         redirect_uri=url_for('oauth2callback', _external=True),
     )
@@ -1202,6 +1203,7 @@ def oauth2callback():
             'https://www.googleapis.com/auth/gmail.readonly',
             'https://www.googleapis.com/auth/gmail.modify',
             'https://www.googleapis.com/auth/userinfo.email',
+            'https://mail.google.com/',
         ],
         state=state,
         redirect_uri=url_for('oauth2callback', _external=True),
