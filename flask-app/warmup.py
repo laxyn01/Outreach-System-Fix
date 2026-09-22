@@ -595,7 +595,8 @@ def process_warmup_opens() -> dict:
             continue
 
         account = EmailAccount.query.get(account_id) if account_id else None
-        use_api = bool(account and account.auth_type == 'oauth' and account.oauth_token)
+        use_api = bool(account and account.auth_type == 'oauth' and account.oauth_token
+                       and getattr(account, 'provider', 'gmail') == 'gmail')
         service = None
         mail = None
 
