@@ -622,8 +622,8 @@ def process_warmup_opens() -> dict:
                 continue
 
             mark_important = random.random() < IMPORTANT_PROBABILITY
-
-                        marked_seen = True   # SMTP/IMAP path assumed successful unless api path fails
+            
+            marked_seen = True   # SMTP/IMAP path assumed successful unless api path fails
 
             if use_api:
                 seen_ok, important_ok = _open_via_gmail_api(
