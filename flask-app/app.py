@@ -792,15 +792,19 @@ def account_delete(account_id):
     return redirect(url_for('accounts'))
 
 
-@app.route('/accounts/<int:account_id>/reset-health', methods=['POST'])
-def account_reset_health(account_id):
+@app.route('/accounts/<int:account_id>/delete', methods=['POST'])
+def account_delete(account_id):
+    from models import WarmupEmail
     acc = EmailAccount.query.get_or_404(account_id)
-    acc.is_paused_auto = False
-    acc.consecutive_failures = 0
-    acc.last_error = None
-    acc.last_error_at = None
+    WarmupEmail.query.filter(
+        db.or_(
+            WarmupEmail.sender_account_id == account_id,
+            WarmupEmail.recipient_account_id == account_id,
+        )
+    ).delete(synchronize_session=False)
+    db.session.delete(acc)
     db.session.commit()
-    flash('Account health reset.', 'success')
+    flash('Account deleted.', 'success')
     return redirect(url_for('accounts'))
 
 
