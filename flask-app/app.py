@@ -783,14 +783,6 @@ def accounts():
     settings = Settings.get_singleton()
     return render_template('accounts.html', accounts=accounts_list, settings=settings)
     
-@app.route('/accounts/<int:account_id>/delete', methods=['POST'])
-def account_delete(account_id):
-    acc = EmailAccount.query.get_or_404(account_id)
-    db.session.delete(acc)
-    db.session.commit()
-    flash('Account deleted.', 'success')
-    return redirect(url_for('accounts'))
-
 
 @app.route('/accounts/<int:account_id>/delete', methods=['POST'])
 def account_delete(account_id):
