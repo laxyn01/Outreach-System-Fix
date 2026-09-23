@@ -8,8 +8,17 @@ def _imap_login(mail, account):
     if account.auth_type == 'oauth' and account.oauth_token:
         from google.oauth2.credentials import Credentials
         from google.auth.transport.requests import Request
+        from datetime import datetime
 
         token_data = json.loads(account.oauth_token)
+
+        expiry = None
+        if token_data.get('expiry'):
+            try:
+                expiry = datetime.fromisoformat(token_data['expiry'])
+            except Exception:
+                expiry = None
+
         creds = Credentials(
             token=token_data.get('token'),
             refresh_token=token_data.get('refresh_token'),
@@ -17,16 +26,18 @@ def _imap_login(mail, account):
             client_id=token_data.get('client_id'),
             client_secret=token_data.get('client_secret'),
             scopes=token_data.get('scopes'),
+            expiry=expiry,
         )
-        if creds.expired and creds.refresh_token:
+
+        if creds.refresh_token and (expiry is None or creds.expired):
             creds.refresh(Request())
             token_data['token'] = creds.token
+            token_data['expiry'] = creds.expiry.isoformat() if creds.expiry else None
             account.oauth_token = json.dumps(token_data)
             db.session.commit()
 
-        # TEMP DEBUG — remove after diagnosing
         print(f'[IMAP-DEBUG] {account.email_address}: token_valid={creds.valid}, '
-              f'expired={creds.expired}, scopes={creds.scopes}, '
+              f'expired={creds.expired}, expiry={creds.expiry}, '
               f'token_prefix={(creds.token or "")[:20]}', flush=True)
 
         auth_string = f'user={account.email_address}\x01auth=Bearer {creds.token}\x01\x01'
