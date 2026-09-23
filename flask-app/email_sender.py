@@ -155,20 +155,21 @@ def send_smtp(account: EmailAccount, to_email: str, subject: str, plain: str, ht
 
 def _load_oauth_credentials(account: EmailAccount):
     """Build a google Credentials object from account.oauth_token, refreshing
-    and persisting the access token if it has expired.
-
-    This is the credential-loading block that used to live inline inside
-    send_gmail_api(); it was extracted verbatim so other modules (warmup.py)
-    can reuse the exact same construction and refresh behaviour instead of
-    duplicating it. send_gmail_api() now calls this and is otherwise unchanged.
-
-    Google-specific. Outlook accounts (account.provider == 'outlook') must
-    NOT be passed to this function — use _load_outlook_credentials() instead.
-    """
+    and persisting the access token (and its expiry) if it has expired or if
+    no expiry was ever stored for it (legacy rows saved before this fix)."""
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
+    from datetime import datetime
 
     token_data = json.loads(account.oauth_token)
+
+    expiry = None
+    if token_data.get('expiry'):
+        try:
+            expiry = datetime.fromisoformat(token_data['expiry'])
+        except Exception:
+            expiry = None
+
     creds = Credentials(
         token=token_data.get('token'),
         refresh_token=token_data.get('refresh_token'),
@@ -176,11 +177,16 @@ def _load_oauth_credentials(account: EmailAccount):
         client_id=token_data.get('client_id'),
         client_secret=token_data.get('client_secret'),
         scopes=token_data.get('scopes'),
+        expiry=expiry,
     )
 
-    if creds.expired and creds.refresh_token:
+    # expiry is None for every row saved before this fix — without a stored
+    # expiry, creds.expired is permanently False and refresh() never fires.
+    # Force a refresh in that case too, not just when actually expired.
+    if creds.refresh_token and (expiry is None or creds.expired):
         creds.refresh(Request())
         token_data['token'] = creds.token
+        token_data['expiry'] = creds.expiry.isoformat() if creds.expiry else None
         account.oauth_token = json.dumps(token_data)
         db.session.commit()
 
