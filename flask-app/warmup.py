@@ -20,6 +20,7 @@ Design rules (do not break these):
 import imaplib
 import email as email_lib
 import random
+import requests
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -32,7 +33,10 @@ from models import EmailAccount, EmailLog, Settings, WarmupEmail, db
 # _load_oauth_credentials is the SAME credential construction + refresh block
 # that send_gmail_api() uses; it was extracted into email_sender.py so this
 # module can share it rather than diverge from it.
-from email_sender import _load_oauth_credentials, _send_email
+# _load_outlook_credentials (NEW, OutreachCommand Outlook/Graph warmup task)
+# is the same MSAL-refresh helper send_outlook_graph() already uses — shared
+# here rather than reimplemented, same reasoning as _load_oauth_credentials.
+from email_sender import _load_oauth_credentials, _load_outlook_credentials, _send_email
 from imap_replies import _imap_login
 
 
@@ -522,6 +526,270 @@ def _open_via_gmail_api(service, account: EmailAccount, message_id: str,
     return seen_ok, important_ok
 
 
+# ─── 1c. Graph API helpers (Outlook/Microsoft accounts only) ────────────────
+#
+# NEW (OutreachCommand Outlook/Graph warmup task). These are the Outlook/Graph
+# analogues of the "1b. Gmail API helpers" block above — NOT modifications of
+# any Gmail function. Everything here is only ever called when
+# account.provider == 'outlook'. Nothing in this block is imported or used by
+# any Gmail code path.
+#
+#   "Report not spam"  -> move message out of the Junk Email folder to Inbox
+#                          via POST /me/messages/{id}/move
+#   "read the message"  -> PATCH /me/messages/{id} {"isRead": true}
+#   "mark important"    -> PATCH /me/messages/{id} {"importance": "high"}
+#   finding a message    -> GET /me/messages?$filter=internetMessageId eq '...'
+#                            (Graph's equivalent of Gmail's rfc822msgid: search)
+
+GRAPH_BASE = 'https://graph.microsoft.com/v1.0'
+
+
+def _graph_find_ids(access_token: str, internet_message_id: str):
+    """Map an RFC822 Message-ID header to Graph's internal message id(s).
+    Outlook/Graph analogue of _gmail_find_ids() above.
+
+    NOTE: unlike _gmail_find_ids() (which strips angle brackets before
+    querying Gmail's rfc822msgid: search operator), Graph's internetMessageId
+    $filter expects the value WITH angle brackets, exactly as it appears in
+    the real message header — do not strip them here.
+    """
+    if not internet_message_id:
+        return []
+    clean = internet_message_id.strip()
+    if not (clean.startswith('<') and clean.endswith('>')):
+        clean = f'<{clean.strip("<>")}>'
+    filter_q = requests.utils.quote(f"internetMessageId eq '{clean}'")
+    url = f'{GRAPH_BASE}/me/messages?$filter={filter_q}&$select=id'
+    resp = requests.get(
+        url, headers={'Authorization': f'Bearer {access_token}'}, timeout=15,
+    )
+    resp.raise_for_status()
+    return [m['id'] for m in resp.json().get('value', []) if m.get('id')]
+
+
+def _graph_patch_message(access_token: str, message_id: str, body: dict) -> bool:
+    """Minimal PATCH /me/messages/{id} helper — shared by open-marking and
+    mark-important, since both are just field changes on the same message."""
+    if not body:
+        return False
+    resp = requests.patch(
+        f'{GRAPH_BASE}/me/messages/{message_id}',
+        headers={
+            'Authorization': f'Bearer {access_token}',
+            'Content-Type': 'application/json',
+        },
+        json=body,
+        timeout=15,
+    )
+    resp.raise_for_status()
+    return True
+
+
+def _open_via_graph_api(account: EmailAccount, message_id: str, mark_important: bool):
+    """Mark read (and optionally Important, via Graph's importance field)
+    through Microsoft Graph. Outlook/Graph analogue of _open_via_gmail_api()
+    above — NOT a modification of it.
+
+    Same (seen_ok, important_applied) return shape on purpose, so
+    process_warmup_opens() only needs an additive branch to use this.
+    """
+    try:
+        access_token = _load_outlook_credentials(account)
+    except Exception as e:
+        print(f'[WARMUP][OUTLOOK] {account.email_address}: token refresh failed: {e}', flush=True)
+        return False, False
+
+    try:
+        ids = _graph_find_ids(access_token, message_id)
+    except Exception as e:
+        print(f'[WARMUP][OUTLOOK] {account.email_address}: message lookup failed: {e}', flush=True)
+        return False, False
+    if not ids:
+        return False, False
+
+    patch_body = {'isRead': True}
+    if mark_important:
+        patch_body['importance'] = 'high'
+
+    seen_ok = False
+    important_ok = False
+    for graph_id in ids:
+        try:
+            _graph_patch_message(access_token, graph_id, patch_body)
+            seen_ok = True
+            important_ok = bool(mark_important)
+        except Exception as e:
+            print(f'[WARMUP][OUTLOOK] {account.email_address}: patch failed for {graph_id}: {e}', flush=True)
+    return seen_ok, important_ok
+
+
+def _rescue_from_spam_graph(account: EmailAccount, peer_addresses) -> int:
+    """OAuth/Outlook equivalent of _rescue_from_spam_gmail_api(): the real
+    'Report not spam' action, via Graph. Junk Email is just a normal folder
+    in Graph (not a special quarantine), so this is a plain move to Inbox.
+
+    Errors are NOT swallowed — same reasoning as the Gmail version: this is
+    called from inside a try/except in scan_warmup_inboxes_outlook() so a
+    failure here is visible in that function's error list rather than
+    silently discarded.
+    """
+    access_token = _load_outlook_credentials(account)
+    headers = {'Authorization': f'Bearer {access_token}', 'Content-Type': 'application/json'}
+    rescued = 0
+
+    for addr in peer_addresses:
+        filter_q = requests.utils.quote(f"from/emailAddress/address eq '{addr}'")
+        url = (
+            f'{GRAPH_BASE}/me/mailFolders/JunkEmail/messages'
+            f'?$filter={filter_q}&$select=id&$top=25'
+        )
+        resp = requests.get(url, headers=headers, timeout=15)
+        if resp.status_code == 404:
+            # No Junk Email folder (rare, but possible on some mailboxes) —
+            # nothing to rescue for this account, not an error.
+            continue
+        resp.raise_for_status()
+        for m in resp.json().get('value', []):
+            msg_id = m.get('id')
+            if not msg_id:
+                continue
+            move_resp = requests.post(
+                f'{GRAPH_BASE}/me/messages/{msg_id}/move',
+                headers=headers, json={'destinationId': 'Inbox'}, timeout=15,
+            )
+            if move_resp.status_code in (200, 201):
+                rescued += 1
+    return rescued
+
+
+def _graph_list_recent_from(access_token: str, peer_address: str, since_iso: str):
+    """List recent Inbox messages from a specific peer address, with just the
+    headers needed to run the same loop-guard logic scan_warmup_inboxes()
+    already uses. Outlook/Graph analogue of the IMAP SEARCH+FETCH combo in
+    scan_warmup_inboxes() — NOT a modification of it.
+    """
+    filter_q = requests.utils.quote(
+        f"from/emailAddress/address eq '{peer_address}' and receivedDateTime ge {since_iso}"
+    )
+    url = (
+        f'{GRAPH_BASE}/me/mailFolders/Inbox/messages'
+        f'?$filter={filter_q}'
+        f'&$select=internetMessageId,subject,conversationId'
+        f'&$top=25'
+    )
+    resp = requests.get(
+        url, headers={'Authorization': f'Bearer {access_token}'}, timeout=15,
+    )
+    resp.raise_for_status()
+    return resp.json().get('value', [])
+
+
+def scan_warmup_inboxes_outlook() -> dict:
+    """Scheduled job #3b — Outlook/Graph sibling of scan_warmup_inboxes().
+
+    NEW (OutreachCommand Outlook/Graph warmup task). This is a SEPARATE
+    function, not a branch inside scan_warmup_inboxes(), per the handoff's
+    explicit preference: it keeps the existing Gmail/IMAP loop in that
+    function completely untouched. This function is called alongside it
+    (see scheduler.py's warmup_inbox_job_outlook), never instead of it.
+
+    Does the Outlook-equivalent of what scan_warmup_inboxes() does for Gmail:
+    rescue anything from Junk Email, then detect delivered warmup emails and
+    schedule a delayed reply for ORIGINAL warmup emails only. Reuses
+    _match_warmup_row() as-is (it's provider-agnostic — operates on
+    WarmupEmail rows, not raw IMAP/Graph data) and the exact same
+    LOOP GUARD 1/2/3 logic as scan_warmup_inboxes(), so the two functions
+    stay behaviorally identical even though they talk to different APIs.
+    """
+    now = datetime.utcnow()
+    pool = _warmup_pool()
+    if len(pool) < 2:
+        return {'scanned': 0, 'scheduled': 0, 'errors': []}
+
+    since_iso = (now - timedelta(days=2)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    scanned = 0
+    scheduled = 0
+    errors = []
+
+    for account in pool:
+        # Mirror image of scan_warmup_inboxes()'s Gmail-only guard: this
+        # function only ever processes Outlook accounts, so Gmail accounts
+        # (and any future third provider) are skipped here.
+        if getattr(account, 'provider', 'gmail') != 'outlook':
+            continue
+
+        peers = [p for p in pool if p.id != account.id]
+        peer_addresses = [p.email_address for p in peers]
+
+        try:
+            access_token = _load_outlook_credentials(account)
+        except Exception as e:
+            errors.append(f'{account.email_address}: token refresh failed: {e}')
+            continue
+
+        try:
+            _rescue_from_spam_graph(account, peer_addresses)
+        except Exception as e:
+            errors.append(f'{account.email_address}: outlook spam-rescue failed: {e}')
+            # Non-fatal — still try reply-detection below, same as the Gmail
+            # function keeps scanning INBOX even if spam-rescue errored.
+
+        try:
+            for peer in peers:
+                try:
+                    messages = _graph_list_recent_from(access_token, peer.email_address, since_iso)
+                except Exception as e:
+                    errors.append(f'{account.email_address}: lookup for {peer.email_address} failed: {e}')
+                    continue
+
+                for m in messages:
+                    scanned += 1
+                    subject = m.get('subject') or ''
+                    message_id = m.get('internetMessageId') or ''
+
+                    # ── LOOP GUARD 1 (same as scan_warmup_inboxes): never
+                    # reply to something that is itself a reply. Graph's
+                    # $select above doesn't include In-Reply-To (it isn't a
+                    # queryable top-level property), so the Re: subject check
+                    # is the guard that matters here; _match_warmup_row()'s
+                    # own is_reply / reply_scheduled checks below are the
+                    # second and third lines of defense, identical to Gmail.
+                    if subject.strip().lower().startswith('re:'):
+                        continue
+
+                    row = _match_warmup_row(
+                        account, message_id, subject, peer.email_address.lower(), now
+                    )
+                    if not row:
+                        continue
+                    # ── LOOP GUARD 2: row must be an original, not a reply.
+                    if row.is_reply:
+                        continue
+                    # ── LOOP GUARD 3: one reply per thread, ever.
+                    if row.reply_scheduled or row.reply_sent:
+                        continue
+                    if WarmupEmail.query.filter_by(parent_id=row.id).first():
+                        continue
+
+                    row.delivered_detected_at = now
+                    if not row.message_id and message_id:
+                        row.message_id = message_id
+                    if random.random() <= REPLY_PROBABILITY:
+                        row.reply_scheduled = True
+                        row.reply_due_at = now + timedelta(
+                            seconds=random.randint(*REPLY_DELAY_SECONDS)
+                        )
+                        scheduled += 1
+                    else:
+                        row.reply_sent = True
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            errors.append(f'{account.email_address}: {e}')
+
+    return {'scanned': scanned, 'scheduled': scheduled, 'errors': errors}
+
+
 # ─── 2. Deferred open simulation ─────────────────────────────────────────────
 #
 # NOTE ON "MARK AS IMPORTANT" FOR SMTP / APP-PASSWORD ACCOUNTS:
@@ -597,6 +865,11 @@ def process_warmup_opens() -> dict:
         account = EmailAccount.query.get(account_id) if account_id else None
         use_api = bool(account and account.auth_type == 'oauth' and account.oauth_token
                        and getattr(account, 'provider', 'gmail') == 'gmail')
+        # NEW (OutreachCommand Outlook/Graph warmup task) — parallel branch to
+        # use_api above, gated on provider == 'outlook'. Nothing about the
+        # Gmail use_api branch above or below is touched.
+        use_graph_api = bool(account and account.auth_type == 'oauth' and account.oauth_token
+                             and getattr(account, 'provider', 'gmail') == 'outlook')
         service = None
         mail = None
 
@@ -607,7 +880,13 @@ def process_warmup_opens() -> dict:
                 use_api = False
                 errors.append(f'{account.email_address}: gmail api unavailable: {e}')
 
-        if account is not None and not use_api:
+        # NEW: also skip the IMAP fallback for Outlook accounts — it was
+        # falling through to _imap_login()/IMAP_HOST (hardcoded to
+        # imap.gmail.com, and _imap_login() only builds Google-shaped
+        # Credentials), which is the "likely broken silently" bug the
+        # handoff flagged. Outlook accounts now go through use_graph_api
+        # below instead of ever reaching this block.
+        if account is not None and not use_api and not use_graph_api:
             try:
                 mail = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
                 _imap_login(mail, account)
@@ -629,6 +908,15 @@ def process_warmup_opens() -> dict:
             if use_api:
                 seen_ok, important_ok = _open_via_gmail_api(
                     service, account, row.message_id, mark_important
+                )
+                marked_seen = seen_ok
+                if important_ok:
+                    important += 1
+            elif use_graph_api:
+                # NEW (OutreachCommand Outlook/Graph warmup task) — Outlook
+                # open-marking (+ optional importance:high) via Graph.
+                seen_ok, important_ok = _open_via_graph_api(
+                    account, row.message_id, mark_important
                 )
                 marked_seen = seen_ok
                 if important_ok:
