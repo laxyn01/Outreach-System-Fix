@@ -24,8 +24,17 @@ def _imap_login(mail, account):
             account.oauth_token = json.dumps(token_data)
             db.session.commit()
 
+        # TEMP DEBUG — remove after diagnosing
+        print(f'[IMAP-DEBUG] {account.email_address}: token_valid={creds.valid}, '
+              f'expired={creds.expired}, scopes={creds.scopes}, '
+              f'token_prefix={(creds.token or "")[:20]}', flush=True)
+
         auth_string = f'user={account.email_address}\x01auth=Bearer {creds.token}\x01\x01'
-        mail.authenticate('XOAUTH2', lambda x: auth_string.encode())
+        try:
+            mail.authenticate('XOAUTH2', lambda x: auth_string.encode())
+        except Exception as e:
+            print(f'[IMAP-DEBUG] {account.email_address}: XOAUTH2 raw error: {e}', flush=True)
+            raise
     else:
         mail.login(account.email_address, account.app_password)
 
