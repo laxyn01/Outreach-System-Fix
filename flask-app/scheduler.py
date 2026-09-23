@@ -11,6 +11,7 @@ def start_scheduler(app):
         process_warmup_opens,
         process_warmup_replies,
         scan_warmup_inboxes,
+        scan_warmup_inboxes_outlook,
         send_warmup_round,
     )
 
@@ -70,6 +71,12 @@ def start_scheduler(app):
     def warmup_inbox_job():
         _run_warmup('inbox_scan', scan_warmup_inboxes)
 
+    # NEW (OutreachCommand Outlook/Graph warmup task) — sibling job for the
+    # Outlook-only scan_warmup_inboxes_outlook(). Runs independently of
+    # warmup_inbox_job above; the Gmail job and its schedule are untouched.
+    def warmup_inbox_job_outlook():
+        _run_warmup('inbox_scan_outlook', scan_warmup_inboxes_outlook)
+
     if not scheduler.running:
         scheduler.add_job(send_job, 'interval', minutes=1, id='send_job', replace_existing=True)
         scheduler.add_job(reply_job, 'interval', hours=4, id='reply_job', replace_existing=True)
@@ -88,6 +95,13 @@ def start_scheduler(app):
         )
         scheduler.add_job(
             warmup_inbox_job, 'interval', minutes=5, id='warmup_inbox_job',
+            replace_existing=True, max_instances=1, misfire_grace_time=600,
+        )
+        # NEW (OutreachCommand Outlook/Graph warmup task) — additive job,
+        # same cadence as the Gmail inbox-scan job above, but a separate
+        # scheduler id so it can be paused/removed independently if needed.
+        scheduler.add_job(
+            warmup_inbox_job_outlook, 'interval', minutes=5, id='warmup_inbox_job_outlook',
             replace_existing=True, max_instances=1, misfire_grace_time=600,
         )
         scheduler.start()
