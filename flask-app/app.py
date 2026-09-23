@@ -1233,12 +1233,13 @@ def oauth2callback():
         return redirect(url_for('accounts'))
 
     token_data = {
-        'token': creds.token,
-        'refresh_token': creds.refresh_token,
-        'client_id': creds.client_id,
-        'client_secret': creds.client_secret,
-        'scopes': list(creds.scopes or []),
-    }
+    'token': creds.token,
+    'refresh_token': creds.refresh_token,
+    'client_id': creds.client_id,
+    'client_secret': creds.client_secret,
+    'scopes': list(creds.scopes or []),
+    'expiry': creds.expiry.isoformat() if creds.expiry else None,
+}
 
     existing = EmailAccount.query.filter_by(email_address=email).first()
     if existing:
