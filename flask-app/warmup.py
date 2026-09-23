@@ -468,7 +468,7 @@ def _rescue_from_spam_gmail_api(account: EmailAccount, peer_addresses) -> int:
 
     IMPORTANT: errors are NOT swallowed here. Any exception (a missing-scope
     error or anything else) is warned-about-if-relevant and then RE-RAISED so
-    it propagates to scan_warmup_inboxes(), whose except block is what runs
+    it propagates to (), whose except block is what runs
     the original IMAP copy+delete fallback for this account. An earlier
     version of this function caught scope errors internally and returned the
     partial count instead of raising, which meant that except block never
@@ -753,6 +753,13 @@ def scan_warmup_inboxes() -> dict:
     errors = []
 
     for account in pool:
+        # Outlook/Graph accounts don't use Gmail's IMAP host or Google-shaped
+        # tokens — _imap_login() only knows how to build Google Credentials.
+        # Skip IMAP scan entirely for them until a Graph-native equivalent
+        # (spam-rescue + reply-detection via Graph API) is built.
+        if getattr(account, 'provider', 'gmail') != 'gmail':
+            continue
+
         peers = [p for p in pool if p.id != account.id]
         peer_addresses = [p.email_address for p in peers]
         mail = None
