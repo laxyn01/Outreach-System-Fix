@@ -86,22 +86,22 @@ def start_scheduler(app):
             replace_existing=True, max_instances=1, misfire_grace_time=120,
         )
         scheduler.add_job(
-            warmup_open_job, 'interval', minutes=5, id='warmup_open_job',
+            warmup_open_job, 'interval', minutes=10, jitter=120, id='warmup_open_job',
             replace_existing=True, max_instances=1, misfire_grace_time=300,
         )
         scheduler.add_job(
-            warmup_reply_job, 'interval', minutes=5, id='warmup_reply_job',
+            warmup_reply_job, 'interval', minutes=10, jitter=120, id='warmup_reply_job',
             replace_existing=True, max_instances=1, misfire_grace_time=300,
         )
         scheduler.add_job(
-            warmup_inbox_job, 'interval', minutes=30, id='warmup_inbox_job',
+            warmup_inbox_job, 'interval', minutes=30, jitter=180, id='warmup_inbox_job',
             replace_existing=True, max_instances=1, misfire_grace_time=600,
         )
         # NEW (OutreachCommand Outlook/Graph warmup task) — additive job,
         # same cadence as the Gmail inbox-scan job above, but a separate
         # scheduler id so it can be paused/removed independently if needed.
         scheduler.add_job(
-            warmup_inbox_job_outlook, 'interval', minutes=30, id='warmup_inbox_job_outlook',
+            warmup_inbox_job_outlook, 'interval', minutes=30, jitter=180, id='warmup_inbox_job_outlook',
             replace_existing=True, max_instances=1, misfire_grace_time=600,
         )
         scheduler.start()
