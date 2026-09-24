@@ -709,6 +709,7 @@ def scan_warmup_inboxes_outlook() -> dict:
     since_iso = (now - timedelta(days=2)).strftime('%Y-%m-%dT%H:%M:%SZ')
     scanned = 0
     scheduled = 0
+    rescued = 0
     errors = []
 
     for account in pool:
@@ -728,7 +729,7 @@ def scan_warmup_inboxes_outlook() -> dict:
             continue
 
         try:
-            _rescue_from_spam_graph(account, peer_addresses)
+            rescued += _rescue_from_spam_graph(account, peer_addresses
         except Exception as e:
             errors.append(f'{account.email_address}: outlook spam-rescue failed: {e}')
             # Non-fatal — still try reply-detection below, same as the Gmail
@@ -787,7 +788,7 @@ def scan_warmup_inboxes_outlook() -> dict:
             db.session.rollback()
             errors.append(f'{account.email_address}: {e}')
 
-    return {'scanned': scanned, 'scheduled': scheduled, 'errors': errors}
+    return {'scanned': scanned, 'scheduled': scheduled, 'rescued': rescued, 'errors': errors}
 
 
 # ─── 2. Deferred open simulation ─────────────────────────────────────────────
