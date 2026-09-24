@@ -729,7 +729,7 @@ def scan_warmup_inboxes_outlook() -> dict:
             continue
 
         try:
-            rescued += _rescue_from_spam_graph(account, peer_addresses
+            rescued += _rescue_from_spam_graph(account, peer_addresses)
         except Exception as e:
             errors.append(f'{account.email_address}: outlook spam-rescue failed: {e}')
             # Non-fatal — still try reply-detection below, same as the Gmail
