@@ -207,6 +207,20 @@ MS_CLIENT_SECRET = os.getenv('MS_CLIENT_SECRET')
 MS_AUTHORITY = 'https://login.microsoftonline.com/common'
 MS_SCOPES = ['Mail.Send', 'Mail.ReadWrite', 'User.Read']
 
+# NEW: in-memory cache for Outlook/Graph access tokens, keyed by account.id.
+# Microsoft's abuse-detection (AADSTS70000 "service abuse mode") can trigger
+# on accounts that get their token refreshed too frequently — warmup calls
+# _load_outlook_credentials() on the same account multiple times within a
+# few minutes (open-marking, spam-rescue, sending), and without this cache
+# every one of those calls was a fresh MSAL refresh-token call to Microsoft.
+# This cache holds the token for up to ~55 minutes (Graph tokens are valid
+# ~60 minutes; 5-minute safety buffer) so repeat calls within that window
+# reuse the same token instead of hitting Microsoft again. Process-local
+# only (resets on restart/redeploy) — that's fine, a cache miss just falls
+# through to a normal refresh.
+_outlook_token_cache = {}
+_OUTLOOK_TOKEN_CACHE_SECONDS = 55 * 60
+
 
 def _load_outlook_credentials(account: EmailAccount) -> str:
     """Return a valid Graph API access token for an Outlook/Microsoft 365
@@ -226,6 +240,14 @@ def _load_outlook_credentials(account: EmailAccount) -> str:
     that's all send_outlook_graph() needs to call Graph's REST API directly.
     """
     import msal
+    import time
+
+    # NEW: serve from the in-memory cache if we refreshed this account's
+    # token recently and it hasn't hit the cache TTL yet — avoids hammering
+    # Microsoft's refresh endpoint on every call.
+    cached = _outlook_token_cache.get(account.id)
+    if cached and (time.monotonic() - cached['cached_at']) < _OUTLOOK_TOKEN_CACHE_SECONDS:
+        return cached['access_token']
 
     token_data = json.loads(account.oauth_token)
 
@@ -263,6 +285,13 @@ def _load_outlook_credentials(account: EmailAccount) -> str:
 
     account.oauth_token = json.dumps(merged)
     db.session.commit()
+
+    # NEW: populate the cache so the next call within the TTL window skips
+    # Microsoft entirely.
+    _outlook_token_cache[account.id] = {
+        'access_token': merged['access_token'],
+        'cached_at': time.monotonic(),
+    }
 
     return merged['access_token']
 
