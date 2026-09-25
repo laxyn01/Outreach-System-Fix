@@ -271,9 +271,34 @@ def _load_outlook_credentials(account: EmailAccount) -> str:
         )
 
     if not result or 'access_token' not in result:
+        error_desc = (
+            (result or {}).get('error_description')
+            or (result or {}).get('error')
+            or 'no refresh_token stored'
+        )
+        # NEW: circuit-breaker for Microsoft's abuse-detection flag
+        # (AADSTS70000 "service abuse mode"). Without this, every scheduled
+        # job that touches this account (send, open, spam-rescue, inbox
+        # scan) keeps retrying and hitting Microsoft again — which does not
+        # help and just adds noise/risk. Uses the SAME is_paused_auto /
+        # last_error / last_error_at columns already used for other
+        # account-health pausing (see account_reset_health() in app.py,
+        # and the existing is_paused_auto check in send_warmup_round() /
+        # try_send_next_email()) — no schema change needed. The message
+        # left in last_error is meant to be read directly off the Accounts
+        # page (wherever last_error is already shown there).
+        if 'AADSTS70000' in str(error_desc) or 'service abuse mode' in str(error_desc).lower():
+            account.is_paused_auto = True
+            account.last_error = (
+                '⚠️ Microsoft flagged this account (AADSTS70000 — service abuse mode). '
+                'Warmup and sending are paused for it. To fix: log in to this account '
+                'in a normal browser, clear any security challenge Microsoft shows, '
+                'then wait ~24h before re-enabling it (Reset Health) on the Accounts page.'
+            )
+            account.last_error_at = datetime.utcnow()
+            db.session.commit()
         raise RuntimeError(
-            f'Failed to refresh Outlook/Graph token for {account.email_address}: '
-            f'{(result or {}).get("error_description") or (result or {}).get("error") or "no refresh_token stored"}'
+            f'Failed to refresh Outlook/Graph token for {account.email_address}: {error_desc}'
         )
 
     # MSAL's refresh result may omit a new refresh_token (Microsoft doesn't
