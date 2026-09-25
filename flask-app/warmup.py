@@ -43,8 +43,15 @@ from imap_replies import _imap_login
 # ─── Tunables ────────────────────────────────────────────────────────────────
 
 WARMUP_START_VOLUME = 2        # emails/day on warmup_day 1
-WARMUP_DEFAULT_TARGET = 18     # emails/day once fully ramped
+WARMUP_DEFAULT_TARGET = 10     # emails/day once fully ramped (Gmail — unchanged)
 WARMUP_RAMP_DAYS = 21          # ~3 weeks from start volume to target
+
+# NEW: Outlook accounts are capped lower than Gmail's default, following the
+# AADSTS70000 (Microsoft "service abuse mode") incident on Sep 25 2026 — a
+# batch of newly-connected Outlook accounts got flagged. This cap is a
+# separate constant, gated to provider == 'outlook' in _ramp_volume() below,
+# so it never affects the Gmail target/ramp logic.
+OUTLOOK_WARMUP_MAX_TARGET = 10
 
 WARMUP_WINDOW_START_HOUR = 7   # local hour (Settings.timezone) warmup may start
 WARMUP_WINDOW_END_HOUR = 21    # local hour warmup stops
@@ -185,6 +192,12 @@ def _ramp_volume(account: EmailAccount) -> int:
     day = max(1, min(day, 60))
     target = int(account.warmup_target_daily or WARMUP_DEFAULT_TARGET)
     target = max(WARMUP_START_VOLUME, target)
+    # NEW: hard cap for Outlook accounts — see OUTLOOK_WARMUP_MAX_TARGET
+    # comment above. Applies even if account.warmup_target_daily was stored
+    # as 18 from before this change. Gmail accounts are untouched by this
+    # branch (provider check).
+    if getattr(account, 'provider', 'gmail') == 'outlook':
+        target = min(target, OUTLOOK_WARMUP_MAX_TARGET)
     if day >= WARMUP_RAMP_DAYS:
         volume = float(target)
     else:
@@ -709,7 +722,6 @@ def scan_warmup_inboxes_outlook() -> dict:
     since_iso = (now - timedelta(days=2)).strftime('%Y-%m-%dT%H:%M:%SZ')
     scanned = 0
     scheduled = 0
-    rescued = 0
     errors = []
 
     for account in pool:
@@ -717,6 +729,12 @@ def scan_warmup_inboxes_outlook() -> dict:
         # function only ever processes Outlook accounts, so Gmail accounts
         # (and any future third provider) are skipped here.
         if getattr(account, 'provider', 'gmail') != 'outlook':
+            continue
+        # NEW: circuit-breaker — skip accounts Microsoft has already flagged
+        # (AADSTS70000), rather than retrying every run. See
+        # _load_outlook_credentials() in email_sender.py for where the flag
+        # gets set.
+        if account.is_paused_auto:
             continue
 
         peers = [p for p in pool if p.id != account.id]
@@ -729,7 +747,7 @@ def scan_warmup_inboxes_outlook() -> dict:
             continue
 
         try:
-            rescued += _rescue_from_spam_graph(account, peer_addresses)
+            _rescue_from_spam_graph(account, peer_addresses)
         except Exception as e:
             errors.append(f'{account.email_address}: outlook spam-rescue failed: {e}')
             # Non-fatal — still try reply-detection below, same as the Gmail
@@ -788,7 +806,7 @@ def scan_warmup_inboxes_outlook() -> dict:
             db.session.rollback()
             errors.append(f'{account.email_address}: {e}')
 
-    return {'scanned': scanned, 'scheduled': scheduled, 'rescued': rescued, 'errors': errors}
+    return {'scanned': scanned, 'scheduled': scheduled, 'errors': errors}
 
 
 # ─── 2. Deferred open simulation ─────────────────────────────────────────────
@@ -869,8 +887,13 @@ def process_warmup_opens() -> dict:
         # NEW (OutreachCommand Outlook/Graph warmup task) — parallel branch to
         # use_api above, gated on provider == 'outlook'. Nothing about the
         # Gmail use_api branch above or below is touched.
+        # UPDATED: also requires not is_paused_auto — a circuit-breaker so a
+        # Microsoft-flagged account (AADSTS70000) stops being retried every
+        # run; see _load_outlook_credentials() in email_sender.py for where
+        # the flag gets set.
         use_graph_api = bool(account and account.auth_type == 'oauth' and account.oauth_token
-                             and getattr(account, 'provider', 'gmail') == 'outlook')
+                             and getattr(account, 'provider', 'gmail') == 'outlook'
+                             and not account.is_paused_auto)
         service = None
         mail = None
 
@@ -886,8 +909,11 @@ def process_warmup_opens() -> dict:
         # imap.gmail.com, and _imap_login() only builds Google-shaped
         # Credentials), which is the "likely broken silently" bug the
         # handoff flagged. Outlook accounts now go through use_graph_api
-        # below instead of ever reaching this block.
-        if account is not None and not use_api and not use_graph_api:
+        # above instead of ever reaching this block — the explicit provider
+        # check here additionally makes sure a PAUSED Outlook account (where
+        # use_graph_api is False above) still never falls through to IMAP.
+        if (account is not None and not use_api and not use_graph_api
+                and getattr(account, 'provider', 'gmail') != 'outlook'):
             try:
                 mail = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
                 _imap_login(mail, account)
@@ -1196,6 +1222,16 @@ def process_warmup_replies(max_replies: int = 5) -> dict:
         if not replier or not original_sender or not replier.warmup_enabled:
             row.reply_sent = True
             db.session.commit()
+            continue
+        # NEW: skip health-paused accounts (is_paused_auto) instead of
+        # attempting a send that will just fail again. This is a general
+        # account-health check — is_paused_auto is the same flag
+        # try_send_next_email() already sets/respects for real campaigns,
+        # and it's what the new Outlook circuit-breaker sets on an
+        # AADSTS70000 flag (see _load_outlook_credentials() in
+        # email_sender.py). Not marking reply_sent here, so it retries
+        # automatically once the account is unpaused.
+        if replier.is_paused_auto:
             continue
 
         replier.reset_warmup_daily_if_needed()
