@@ -434,6 +434,14 @@ def _run_migrations():
         # message id, separate from the RFC internetMessageId already stored
         # in email_logs.message_id — needed for createReply() lookups.
         "ALTER TABLE email_logs ADD COLUMN IF NOT EXISTS outlook_message_id VARCHAR(255)",
+        # ── NEW (HANDOFF #5 fix, item 3): settings.daily_limit_per_account
+        # was defined on the Settings model but had no migration line here.
+        # db.create_all() only creates missing TABLES, not missing columns
+        # on tables that already exist — if the live settings table predates
+        # this column, every Settings.get_singleton() call (used by /accounts,
+        # /, /settings, and more) throws a ProgrammingError. Added
+        # speculatively but safely — see note above this list.
+        "ALTER TABLE settings ADD COLUMN IF NOT EXISTS daily_limit_per_account INTEGER DEFAULT 15",
     ]
     with db.engine.connect() as conn:
         for sql in migrations:
