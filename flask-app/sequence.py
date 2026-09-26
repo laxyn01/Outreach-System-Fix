@@ -105,6 +105,19 @@ def get_available_accounts(settings: Settings) -> list:
     available = []
     for acc in accounts:
         acc.reset_daily_if_needed()
+        # HANDOFF #5 fix (item 4): this was previously only checking the
+        # daily send limit, NOT is_paused_auto — meaning a Microsoft-flagged
+        # Outlook account, or a hard-blocked (quota/suspended/disabled)
+        # Gmail account, could still get picked here for a REAL campaign
+        # send, fail again, and bump consecutive_failures for nothing.
+        # is_paused_auto is the same account-health flag already used by
+        # warmup (send_warmup_round(), process_warmup_replies()) and by the
+        # Outlook circuit-breaker in _load_outlook_credentials() — applying
+        # the same check here just makes real-campaign sending consistent
+        # with what warmup already does. Unblocking still works exactly the
+        # same way as before (Reset Health button on the Accounts page).
+        if acc.is_paused_auto:
+            continue
         if acc.daily_sent_count < limit:
             available.append(acc)
     return available
