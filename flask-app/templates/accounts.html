@@ -46,9 +46,12 @@
     </thead>
     <tbody>
       {% for acc in accounts %}
+      {% set limit = settings.daily_limit_per_account or 1 %}
       <tr>
         <td class="font-medium">{{ acc.email_address }}</td>
+        <td>
         {% if acc.auth_type == 'oauth' %}OAuth{% else %}{{ acc.smtp_host }}:{{ acc.smtp_port }}{% endif %}
+        </td>
                 <td>
           {% if acc.is_paused_auto %}
             <span class="badge badge-red" title="{{ acc.last_error or '' }}">🔴 Blocked</span>
@@ -67,7 +70,7 @@
           <div style="display:flex;align-items:center;gap:8px;">
             <span>{{ acc.daily_sent_count }} / {{ settings.daily_limit_per_account }}</span>
             <div class="progress-bar" style="width:60px;">
-              <div class="progress-fill" style="width:{{ [(acc.daily_sent_count / settings.daily_limit_per_account * 100)|int, 100]|min }}%;"></div>
+              <div class="progress-fill" style="width:{{ [(acc.daily_sent_count / limit * 100)|int, 100]|min }}%;"></div>
             </div>
           </div>
         </td>
