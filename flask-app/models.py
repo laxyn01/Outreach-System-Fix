@@ -387,6 +387,15 @@ def init_db(app):
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
     'pool_pre_ping': True,
     'pool_recycle': 280,
+    # HANDOFF #5 fix: disable psycopg v3's automatic server-side prepared
+    # statements. Supabase's connection pooler runs in PgBouncer Transaction
+    # Mode, which reassigns a pooled connection between different sessions —
+    # psycopg v3 tries to re-prepare the same statement name ("_pg3_N") on a
+    # connection that already has it from a different session, causing
+    # psycopg2.errors.DuplicatePreparedStatement. This setting is harmless
+    # for plain (non-pooled) Postgres too, so it's safe to leave on either
+    # way.
+    'connect_args': {'prepare_threshold': None}    
 }
     db.init_app(app)
     with app.app_context():
