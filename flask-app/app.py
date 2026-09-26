@@ -974,7 +974,11 @@ def settings_page():
         settings.timezone = request.form.get('timezone', 'Asia/Kolkata')
         days = request.form.getlist('active_days')
         settings.active_days = ','.join(days) if days else 'Mon,Tue,Wed,Thu,Fri'
-        settings.daily_limit_per_account = request.form.get('daily_limit_per_account', 15, type=int)
+        # HANDOFF #5 fix, item 3: floor at 1 so this can never be saved as 0
+        # again (a 0 here causes a ZeroDivisionError in accounts.html's
+        # progress-bar calc — see the accounts.html fix in this same batch,
+        # which also guards the template side independently as a second layer).
+        settings.daily_limit_per_account = max(1, request.form.get('daily_limit_per_account', 15, type=int) or 1)
         db.session.commit()
         flash('Settings saved.', 'success')
         return redirect(url_for('settings_page'))
