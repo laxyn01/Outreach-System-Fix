@@ -242,6 +242,27 @@ def _load_outlook_credentials(account: EmailAccount) -> str:
     import msal
     import time
 
+    # NEW (HANDOFF #5 fix, item 3): fail-fast circuit-breaker. Every call
+    # site (send_outlook_graph, _open_via_graph_api, _rescue_from_spam_graph,
+    # scan_warmup_inboxes_outlook's direct call) independently calls this
+    # function, and each one used to retry against Microsoft regardless of
+    # whether the account had ALREADY been flagged moments earlier in the
+    # same job run — that's how one account racked up 10-24+ consecutive
+    # AADSTS70000 failures in a single scheduled job. This check is the
+    # single-point fix: if the account is already paused, raise immediately
+    # without calling Microsoft at all. It automatically protects every call
+    # site above instead of requiring each one to be patched individually.
+    if account.is_paused_auto:
+        print(
+            f'[OUTLOOK][CIRCUIT-BREAKER] {account.email_address}: call skipped — '
+            f'already paused (is_paused_auto=True), NOT calling Microsoft.',
+            flush=True,
+        )
+        raise RuntimeError(
+            f'{account.email_address} is paused (is_paused_auto=True) — '
+            f'skipping Microsoft token refresh to avoid further AADSTS70000 hits.'
+        )
+
     # NEW: serve from the in-memory cache if we refreshed this account's
     # token recently and it hasn't hit the cache TTL yet — avoids hammering
     # Microsoft's refresh endpoint on every call.
@@ -297,6 +318,15 @@ def _load_outlook_credentials(account: EmailAccount) -> str:
             )
             account.last_error_at = datetime.utcnow()
             db.session.commit()
+            # NEW (HANDOFF #5 fix, item 3): print confirmation the breaker
+            # fired, so this is verifiable directly from Render logs instead
+            # of needing a manual DB query every time.
+            print(
+                f'[OUTLOOK][CIRCUIT-BREAKER] {account.email_address}: TRIPPED — '
+                f'AADSTS70000 detected, is_paused_auto set True. Further calls '
+                f'for this account will be skipped until Reset Health.',
+                flush=True,
+            )
         raise RuntimeError(
             f'Failed to refresh Outlook/Graph token for {account.email_address}: {error_desc}'
         )
