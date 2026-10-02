@@ -43,7 +43,8 @@ from imap_replies import _imap_login
 # ─── Tunables ────────────────────────────────────────────────────────────────
 
 WARMUP_START_VOLUME = 2        # emails/day on warmup_day 1
-WARMUP_DEFAULT_TARGET = 10     # emails/day once fully ramped (Gmail — unchanged)
+WARMUP_DEFAULT_TARGET = 2      # emails/day once fully ramped
+WARMUP_MAX_TARGET = 2          # NEW: hard cap for all providers, overrides DB value
 WARMUP_RAMP_DAYS = 21          # ~3 weeks from start volume to target
 
 # NEW: Outlook accounts are capped lower than Gmail's default, following the
@@ -51,7 +52,7 @@ WARMUP_RAMP_DAYS = 21          # ~3 weeks from start volume to target
 # batch of newly-connected Outlook accounts got flagged. This cap is a
 # separate constant, gated to provider == 'outlook' in _ramp_volume() below,
 # so it never affects the Gmail target/ramp logic.
-OUTLOOK_WARMUP_MAX_TARGET = 10
+OUTLOOK_WARMUP_MAX_TARGET = 2
 
 WARMUP_WINDOW_START_HOUR = 7   # local hour (Settings.timezone) warmup may start
 WARMUP_WINDOW_END_HOUR = 21    # local hour warmup stops
@@ -192,6 +193,7 @@ def _ramp_volume(account: EmailAccount) -> int:
     day = max(1, min(day, 60))
     target = int(account.warmup_target_daily or WARMUP_DEFAULT_TARGET)
     target = max(WARMUP_START_VOLUME, target)
+    target = min(target, WARMUP_MAX_TARGET)          # NEW: caps stored DB value (e.g. 18)
     # NEW: hard cap for Outlook accounts — see OUTLOOK_WARMUP_MAX_TARGET
     # comment above. Applies even if account.warmup_target_daily was stored
     # as 18 from before this change. Gmail accounts are untouched by this
@@ -206,8 +208,7 @@ def _ramp_volume(account: EmailAccount) -> int:
     volume = int(round(volume))
     if volume > 3:
         volume += random.randint(-1, 1)      # day-to-day jitter, never robotic
-    return max(1, volume)
-
+    return max(1, min(volume, WARMUP_MAX_TARGET))    # NEW
 
 def _todays_goal(account: EmailAccount) -> int:
     """Pick (once per day) how many warmup emails this account will send."""
